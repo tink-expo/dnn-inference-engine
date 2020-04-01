@@ -1,0 +1,6 @@
+/*
+!.gitignore
+!proj*.handout/
+proj*.handout/*
+!proj*.handout/*.py
+!proj*.handout/Dockerfile
