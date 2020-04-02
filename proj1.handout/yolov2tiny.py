@@ -4,6 +4,11 @@ import pickle
 import numpy as np
 import tensorflow as tf
 
+# Constants.
+k_input_height = 416
+k_input_width = 416
+k_bn_epsilon = 1e-5
+
 class YOLO_V2_TINY(object):
 
     def __init__(self, in_shape, weight_pickle, proc="cpu"):
@@ -15,18 +20,18 @@ class YOLO_V2_TINY(object):
         self.weight_pickle = weight_pickle
         self.input_tensor, self.tensor_list = self.build_graph(in_shape)
 
+    def __del__(self):
+        self.sess.close()
+
     def build_graph(self, in_shape):
         #
         # This function builds a tensor graph. Once created,
         # it will be used to inference every frame.
         #
-        # Your code from here. You may clear the comments.
-        #
-        print('build_graph is not yet implemented')
-        sys.exit()
 
         # Load weight parameters from a pickle file.
-
+        with open(self.weight_pickle, 'rb') as weight_f:
+            weight_list = pickle.load(weight_f)
 
         # Create an empty list for tensors.
         tensor_list = []
