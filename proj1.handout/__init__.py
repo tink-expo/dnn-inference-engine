@@ -40,6 +40,16 @@ def resize_input(im):
     imsz = imsz[:,:,::-1]
     return np.asarray(imsz, dtype=np.float32)
 
+def draw_output_frame(frame, label_boxes, img_frame_ratio):
+    for lb in label_boxes:
+        best_class_name, lefttop, rightbottom, color = lb
+        frame = cv2.rectangle(frame, lefttop, rightbottom, color)
+        text_y = int((lefttop[0] + rightbottom[0]) / 2)
+        text_x = int((lefttop[1] + rightbottom[1]) / 2)
+        cv2.putText(frame, best_class_name, (text_y, text_x), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
+    return frame
+
 def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     #
     # This function runs the inference for each frame and creates the output video.
@@ -64,32 +74,39 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     # including resizing the frame and changing the dimension.
     
     original_shape = None
+
     e2e_time = time.time()
     inference_time = 0
+    frame_count = 0
     
     while True:
         ret, frame = in_video.read()
         if not ret:
             break
 
-        if original_shape is None:
-            original_shape = frame.shape
-
         input_img = resize_input(frame)
         input_img = np.expand_dims(input_img, 0)
+        if original_shape is None:
+            original_shape = frame.shape
+            img_frame_ratio = frame.shape[0] / input_img.shape[1]
 
         inference_time_start = time.time()
         predictions = model.inference(input_img)
         inference_time += time.time() - inference_time_start
+        frame_count += 1
 
         label_boxes = yolov2tiny.postprocessing(predictions[-1])
-        break
+        
+        frame = draw_output_frame(frame, label_boxes, img_frame_ratio)
+        out_video.write(frame)
 
     e2e_time = time.time() - e2e_time
 
     # Check the inference peformance; end-to-end elapsed time and inferencing time.
     # Check how many frames are processed per second respectivly.
-    
+    inference_fps = inference_time / frame_count
+    e2e_fps = e2e_time / frame_count
+    print(inference_fps, e2e_fps)
 
     # Release the opened videos.
     in_video.release()
