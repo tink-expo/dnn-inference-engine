@@ -1,15 +1,15 @@
+import copy
 import os
 import sys
 import pickle
 import numpy as np
 import tensorflow as tf
 
-# Constants.
-k_input_height = 416
-k_input_width = 416
-k_bn_epsilon = 1e-5
-
 class YOLO_V2_TINY(object):
+
+    # Constants.
+    k_bn_epsilon = 1e-5
+    k_alpha = 0.1
 
     def __init__(self, in_shape, weight_pickle, proc="cpu"):
         self.g = tf.Graph()
@@ -46,7 +46,71 @@ class YOLO_V2_TINY(object):
         # build a graph and append the tensors to the returning list for computing intermediate
         # values. One tip is to start adding a placeholder tensor for the first tensor.
         # (Use 1e-5 for the epsilon value of batch normalization layers.)
+        with self.g.as_default(), tf.device("/cpu:0" if self.proc == "cpu" else "/gpu:0"):
+        
+            x = tf.compat.v1.placeholder(tf.float32, shape=in_shape)
+            input_tensor = x
 
+            def conv_bn_layer(x, weight_dict):
+                kernel = weight_dict['kernel']
+                biases = weight_dict['biases']
+                variance = weight_dict['moving_variance']
+                gamma = weight_dict['gamma']
+                mean = weight_dict['moving_mean']
+                for i in range(len(biases)):
+                    norm_factor = gamma[i] / np.sqrt(variance[i] + self.k_bn_epsilon)
+                    kernel[:,:,:,i] = kernel[:,:,:,i] * norm_factor
+                    biases[i] = biases[i] - mean[i] * norm_factor
+
+                x = tf.nn.conv2d(x, kernel, strides=[1, 1, 1, 1], padding='SAME')
+                x = tf.add(x, biases)
+                x = tf.nn.leaky_relu(x, self.k_alpha)
+
+                tensor_list.append(x)
+                return x
+
+            def maxpool_layer(x, kernel_size, stride_size, padding='VALID'):
+                x = tf.nn.max_pool2d(
+                        x, 
+                        ksize=[1, kernel_size, kernel_size, 1], 
+                        strides=[1, stride_size, stride_size, 1], 
+                        padding=padding)
+
+                tensor_list.append(x)
+                return x
+
+            def conv_layer(x, weight_dict):
+                kernel = weight_dict['kernel']
+                biases = weight_dict['biases']
+                x = tf.nn.conv2d(x, kernel, strides=[1, 1, 1, 1], padding='SAME')
+                x = tf.add(x, biases)
+
+                tensor_list.append(x)
+                return x
+
+            x = conv_bn_layer(x, weight_list[0])
+            x = maxpool_layer(x, 2, 2)
+
+            x = conv_bn_layer(x, weight_list[1])
+            x = maxpool_layer(x, 2, 2)
+
+            x = conv_bn_layer(x, weight_list[2])
+            x = maxpool_layer(x, 2, 2)
+
+            x = conv_bn_layer(x, weight_list[3])
+            x = maxpool_layer(x, 2, 2)
+            
+            x = conv_bn_layer(x, weight_list[4])
+            x = maxpool_layer(x, 2, 2)
+            
+            x = conv_bn_layer(x, weight_list[5])
+            x = maxpool_layer(x, 2, 1, padding='SAME')
+            
+            x = conv_bn_layer(x, weight_list[6])
+            
+            x = conv_bn_layer(x, weight_list[7])
+            
+            x = conv_layer(x, weight_list[8])
 
         # Return the start tensor and the list of all tensors.
         return input_tensor, tensor_list
@@ -133,7 +197,7 @@ def postprocessing(predictions):
   
     # Non maximal suppression
     if (len(thresholded_predictions) > 0):
-        nms_predictions = self.non_maximal_suppression(thresholded_predictions, 0.3)
+        nms_predictions = non_maximal_suppression(thresholded_predictions, 0.3)
     else:
         nms_predictions = []
     
@@ -188,7 +252,7 @@ def non_maximal_suppression(thresholded_predictions, iou_threshold):
 
     j = 0
     while j < n_boxes_to_check:
-        curr_iou = self.iou(thresholded_predictions[i][0],nms_predictions[j][0])
+        curr_iou = iou(thresholded_predictions[i][0],nms_predictions[j][0])
         if(curr_iou > iou_threshold ):
             to_delete = True
         #print('Checking box {} vs {}: IOU = {} , To delete = {}'.format(thresholded_predictions[i][0],nms_predictions[j][0],curr_iou,to_delete))

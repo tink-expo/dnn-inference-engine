@@ -5,6 +5,9 @@ import cv2 as cv2
 import time
 import yolov2tiny
 
+k_input_height = 416
+k_input_width = 416
+
 def open_video_with_opencv(in_video_path, out_video_path):
     #
     # This function takes input and output video path and open them.
@@ -19,21 +22,20 @@ def open_video_with_opencv(in_video_path, out_video_path):
         width = int(in_video.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(in_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = in_video.get(cv2.CAP_PROP_FPS)
-        in_shape = (width, height)
 
     # Open an object of output video using cv2.VideoWriter.
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out_video = cv2.VideoWriter(out_video_path, fourcc, fps, in_shape)
+    out_video = cv2.VideoWriter(out_video_path, fourcc, fps, (width, height))
     if not out_video.isOpened():
         print("Failed to open out_video {}".format(out_video_path))
         sys.exit()
 
     # Return the video objects and anything you want for further process.
-    return in_shape, in_video, out_video
+    return in_video, out_video
 
 
 def resize_input(im):
-    imsz = cv2.resize(im, (yolov2tiny.k_input_height, yolov2tiny.k_input_width))
+    imsz = cv2.resize(im, (k_input_height, k_input_width))
     imsz = imsz / 255.
     imsz = imsz[:,:,::-1]
     return np.asarray(imsz, dtype=np.float32)
@@ -43,13 +45,14 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     # This function runs the inference for each frame and creates the output video.
     #
 
-    in_shape, in_video, out_video = open_video_with_opencv(in_video_path, out_video_path)
+    in_video, out_video = open_video_with_opencv(in_video_path, out_video_path)
 
     # Create an instance of the YOLO_V2_TINY class. Pass the dimension of
     # the input, a path to weight file, and which device you will use as arguments.
 
     weight_pickle_path = os.path.join(os.getcwd(), 'y2t_weights.pickle')
-    # model = yolov2tiny.YOLO_V2_TINY(in_shape, weight_pickle_path, proc)
+    model = yolov2tiny.YOLO_V2_TINY(
+            [1, k_input_height, k_input_width, 3], weight_pickle_path, proc)
     # Start the main loop. For each frame of the video, the loop must do the followings:
     # 1. Do the inference.
     # 2. Run postprocessing using the inference result, accumulate them through the video writer object.
@@ -59,12 +62,18 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     # 4. Save the intermediate values for the first layer.
     # Note that your input must be adjusted to fit into the algorithm,
     # including resizing the frame and changing the dimension.
+    
+    original_shape = None
     e2e_time = time.time()
     inference_time = 0
+    
     while True:
         ret, frame = in_video.read()
         if not ret:
             break
+
+        if original_shape is None:
+            original_shape = frame.shape
 
         input_img = resize_input(frame)
         input_img = np.expand_dims(input_img, 0)
@@ -73,8 +82,8 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
         predictions = model.inference(input_img)
         inference_time += time.time() - inference_time_start
 
-        label_boxes = yolov2tiny.postprocessing(predictions)
-
+        label_boxes = yolov2tiny.postprocessing(predictions[-1])
+        break
 
     e2e_time = time.time() - e2e_time
 
