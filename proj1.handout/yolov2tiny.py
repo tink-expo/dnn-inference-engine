@@ -51,16 +51,21 @@ class YOLO_V2_TINY(object):
             x = tf.compat.v1.placeholder(tf.float32, shape=in_shape)
             input_tensor = x
 
-            def conv_bn_layer(x, weight_dict):
+            def conv_bn_layer(x, weight_dict, p=False):
                 kernel = weight_dict['kernel']
                 biases = weight_dict['biases']
                 variance = weight_dict['moving_variance']
                 gamma = weight_dict['gamma']
                 mean = weight_dict['moving_mean']
+                if p:
+                    print(biases)
+                    print()
                 for i in range(len(biases)):
                     norm_factor = gamma[i] / np.sqrt(variance[i] + self.k_bn_epsilon)
                     kernel[:,:,:,i] = kernel[:,:,:,i] * norm_factor
-                    biases[i] = biases[i] - mean[i] * norm_factor
+                    biases[i] = biases[i] * norm_factor - mean[i] * norm_factor
+                if p:
+                    print(biases)
 
                 x = tf.nn.conv2d(x, kernel, strides=[1, 1, 1, 1], padding='SAME')
                 x = tf.add(x, biases)

@@ -41,14 +41,44 @@ def resize_input(im):
     return np.asarray(imsz, dtype=np.float32)
 
 def draw_output_frame(frame, label_boxes, img_frame_ratio):
+    def re_resize_pos(pos):
+        ret = (
+            int(pos[0] * img_frame_ratio[1]),
+            int(pos[1] * img_frame_ratio[0]))
+        return ret
+
     for lb in label_boxes:
         best_class_name, lefttop, rightbottom, color = lb
+        lefttop = re_resize_pos(lefttop)
+        rightbottom = re_resize_pos(rightbottom)
         frame = cv2.rectangle(frame, lefttop, rightbottom, color)
-        text_y = int((lefttop[0] + rightbottom[0]) / 2)
-        text_x = int((lefttop[1] + rightbottom[1]) / 2)
-        cv2.putText(frame, best_class_name, (text_y, text_x), 
+        text_pos = (
+                int((lefttop[0] + rightbottom[0]) / 2),
+                int((lefttop[1] + rightbottom[1]) / 2))
+        cv2.putText(frame, best_class_name, text_pos, 
                 cv2.FONT_HERSHEY_SIMPLEX, 1, color, 3)
     return frame
+
+# Single photo detection for debugging.
+def photo_object_detection(in_photo_path, out_photo_path, proc="cpu"):
+    frame = cv2.imread(in_photo_path)
+
+    weight_pickle_path = os.path.join(os.getcwd(), 'y2t_weights.pickle')
+    model = yolov2tiny.YOLO_V2_TINY(
+            [1, k_input_height, k_input_width, 3], weight_pickle_path, proc)
+    
+    input_img = resize_input(frame)
+    input_img = np.expand_dims(input_img, 0)
+    img_frame_ratio = (
+            frame.shape[0] / input_img.shape[1],
+            frame.shape[1] / input_img.shape[2])
+
+    predictions = model.inference(input_img)
+
+    label_boxes = yolov2tiny.postprocessing(predictions[-1])
+    
+    frame = draw_output_frame(frame, label_boxes, img_frame_ratio)
+    cv2.imwrite(out_photo_path, frame)
 
 def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     #
@@ -73,7 +103,7 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     # Note that your input must be adjusted to fit into the algorithm,
     # including resizing the frame and changing the dimension.
     
-    original_shape = None
+    img_frame_ratio = None
 
     e2e_time = time.time()
     inference_time = 0
@@ -86,9 +116,10 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
 
         input_img = resize_input(frame)
         input_img = np.expand_dims(input_img, 0)
-        if original_shape is None:
-            original_shape = frame.shape
-            img_frame_ratio = frame.shape[0] / input_img.shape[1]
+        if img_frame_ratio is None:
+            img_frame_ratio = (
+                frame.shape[0] / input_img.shape[1],
+                frame.shape[1] / input_img.shape[2])
 
         inference_time_start = time.time()
         predictions = model.inference(input_img)
@@ -104,8 +135,8 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
 
     # Check the inference peformance; end-to-end elapsed time and inferencing time.
     # Check how many frames are processed per second respectivly.
-    inference_fps = inference_time / frame_count
-    e2e_fps = e2e_time / frame_count
+    inference_fps = frame_count / inference_time
+    e2e_fps = frame_count / e2e_time
     print(inference_fps, e2e_fps)
 
     # Release the opened videos.
