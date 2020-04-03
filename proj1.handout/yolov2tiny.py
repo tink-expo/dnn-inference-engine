@@ -58,7 +58,9 @@ class YOLO_V2_TINY(object):
                 mean = weight_dict['moving_mean']
 
                 x = tf.nn.conv2d(x, kernel, strides=[1, 1, 1, 1], padding='SAME')
-                x = tf.add(x, biases)
+                tensor_list.append(x)
+
+                x = tf.nn.bias_add(x, biases)
                 tensor_list.append(x)
 
                 x = tf.nn.batch_normalization(
@@ -78,17 +80,19 @@ class YOLO_V2_TINY(object):
                     strides=[1, stride_size, stride_size, 1], 
                     padding=padding
                 )
-
                 tensor_list.append(x)
+
                 return x
 
             def conv_layer(x, weight_dict):
                 kernel = weight_dict['kernel']
                 biases = weight_dict['biases']
                 x = tf.nn.conv2d(x, kernel, strides=[1, 1, 1, 1], padding='SAME')
-                x = tf.add(x, biases)
-
                 tensor_list.append(x)
+
+                x = tf.nn.bias_add(x, biases)
+                tensor_list.append(x)
+
                 return x
 
             x = conv_bn_layer(x, weight_list[0])
