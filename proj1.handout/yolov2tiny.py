@@ -56,38 +56,28 @@ class YOLO_V2_TINY(object):
                 variance = weight_dict['moving_variance']
                 gamma = weight_dict['gamma']
                 mean = weight_dict['moving_mean']
-                # Semantically, the formula is
-                #
-                # x = conv2d(x, kernel)
-                # x = add(x, biases)
-                # x = batch_norm(x, gamma, variance, epsilon)
-                # x = leaky_relu(x, alpha)
-                #
-                # However, change the formula like below to decrease number of tf ops (4 -> 3).
-                # Now, it changes to:
-                #
-                # x = conv2d(x, modified_kernel)
-                # x = add(x, modified_biases)
-                # x = leaky_relu(x, alpha)
-                #
-                for i in range(len(biases)):
-                    norm_factor = gamma[i] / np.sqrt(variance[i] + self.k_bn_epsilon)
-                    kernel[:,:,:,i] = kernel[:,:,:,i] * norm_factor
-                    biases[i] = biases[i] * norm_factor - mean[i] * norm_factor
 
                 x = tf.nn.conv2d(x, kernel, strides=[1, 1, 1, 1], padding='SAME')
                 x = tf.add(x, biases)
-                x = tf.nn.leaky_relu(x, self.k_alpha)
-
                 tensor_list.append(x)
+
+                x = tf.nn.batch_normalization(
+                    x, mean, variance, offset=0.0, scale=gamma,
+                    variance_epsilon=self.k_bn_epsilon)
+                tensor_list.append(x)
+
+                x = tf.nn.leaky_relu(x, self.k_alpha)
+                tensor_list.append(x)
+                
                 return x
 
             def maxpool_layer(x, kernel_size, stride_size, padding='VALID'):
                 x = tf.nn.max_pool2d(
-                        x, 
-                        ksize=[1, kernel_size, kernel_size, 1], 
-                        strides=[1, stride_size, stride_size, 1], 
-                        padding=padding)
+                    x, 
+                    ksize=[1, kernel_size, kernel_size, 1], 
+                    strides=[1, stride_size, stride_size, 1], 
+                    padding=padding
+                )
 
                 tensor_list.append(x)
                 return x
