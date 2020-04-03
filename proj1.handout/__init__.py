@@ -5,6 +5,7 @@ import cv2 as cv2
 import time
 import yolov2tiny
 
+# Constants.
 k_input_height = 416
 k_input_width = 416
 
@@ -42,10 +43,9 @@ def resize_input(im):
 
 def draw_output_frame(frame, label_boxes, img_frame_ratio):
     def re_resize_pos(pos):
-        ret = (
+        return (
             int(pos[0] * img_frame_ratio[1]),
             int(pos[1] * img_frame_ratio[0]))
-        return ret
 
     for lb in label_boxes:
         best_class_name, lefttop, rightbottom, color = lb

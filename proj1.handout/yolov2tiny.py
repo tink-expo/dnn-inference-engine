@@ -1,4 +1,3 @@
-import copy
 import os
 import sys
 import pickle
@@ -51,21 +50,30 @@ class YOLO_V2_TINY(object):
             x = tf.compat.v1.placeholder(tf.float32, shape=in_shape)
             input_tensor = x
 
-            def conv_bn_layer(x, weight_dict, p=False):
+            def conv_bn_layer(x, weight_dict):
                 kernel = weight_dict['kernel']
                 biases = weight_dict['biases']
                 variance = weight_dict['moving_variance']
                 gamma = weight_dict['gamma']
                 mean = weight_dict['moving_mean']
-                if p:
-                    print(biases)
-                    print()
+                # Semantically, the formula is
+                #
+                # x = conv2d(x, kernel)
+                # x = add(x, biases)
+                # x = batch_norm(x, gamma, variance, epsilon)
+                # x = leaky_relu(x, alpha)
+                #
+                # However, change the formula like below to decrease number of tf ops (4 -> 3).
+                # Now, it changes to:
+                #
+                # x = conv2d(x, modified_kernel)
+                # x = add(x, modified_biases)
+                # x = leaky_relu(x, alpha)
+                #
                 for i in range(len(biases)):
                     norm_factor = gamma[i] / np.sqrt(variance[i] + self.k_bn_epsilon)
                     kernel[:,:,:,i] = kernel[:,:,:,i] * norm_factor
                     biases[i] = biases[i] * norm_factor - mean[i] * norm_factor
-                if p:
-                    print(biases)
 
                 x = tf.nn.conv2d(x, kernel, strides=[1, 1, 1, 1], padding='SAME')
                 x = tf.add(x, biases)
