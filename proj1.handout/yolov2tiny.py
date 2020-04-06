@@ -128,7 +128,7 @@ def postprocessing(predictions):
   
     # Non maximal suppression
     if (len(thresholded_predictions) > 0):
-        nms_predictions = self.non_maximal_suppression(thresholded_predictions, 0.3)
+        nms_predictions = non_maximal_suppression(thresholded_predictions, 0.3)
     else:
         nms_predictions = []
     
@@ -183,7 +183,7 @@ def non_maximal_suppression(thresholded_predictions, iou_threshold):
 
     j = 0
     while j < n_boxes_to_check:
-        curr_iou = self.iou(thresholded_predictions[i][0],nms_predictions[j][0])
+        curr_iou = iou(thresholded_predictions[i][0],nms_predictions[j][0])
         if(curr_iou > iou_threshold ):
             to_delete = True
         #print('Checking box {} vs {}: IOU = {} , To delete = {}'.format(thresholded_predictions[i][0],nms_predictions[j][0],curr_iou,to_delete))
