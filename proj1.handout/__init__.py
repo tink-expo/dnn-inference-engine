@@ -127,6 +127,8 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     # Check how many frames are processed per second respectivly.
     inference_fps = frame_count / inference_time
     e2e_fps = frame_count / e2e_time
+    print("Inference time: {}".format(inference_time))
+    print("End-to-end time: {}".format(e2e_time))
     print("Inference fps: {}".format(inference_fps))
     print("End-to-end fps: {}".format(e2e_fps))
 
@@ -158,15 +160,12 @@ def photo_object_detection(in_photo_path, out_photo_path, proc="cpu"):
     
     input_img = resize_input(frame)
     input_img = np.expand_dims(input_img, 0)
-    img_frame_ratio = (
-            frame.shape[0] / input_img.shape[1],
-            frame.shape[1] / input_img.shape[2])
 
     predictions = model.inference(input_img)
 
     label_boxes = yolov2tiny.postprocessing(predictions[-1])
     
-    frame = draw_output_frame(frame, label_boxes, img_frame_ratio)
+    frame = draw_output_frame(frame, label_boxes)
     cv2.imwrite(out_photo_path, frame)
 
 def main():

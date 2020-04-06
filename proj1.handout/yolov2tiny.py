@@ -46,9 +46,6 @@ class YOLO_V2_TINY(object):
         # values. One tip is to start adding a placeholder tensor for the first tensor.
         # (Use 1e-5 for the epsilon value of batch normalization layers.)
         with self.g.as_default(), tf.device("/cpu:0" if self.proc == "cpu" else "/gpu:0"):
-        
-            x = tf.compat.v1.placeholder(tf.float32, shape=in_shape)
-            input_tensor = x
 
             def conv_bn_layer(x, weight_dict):
                 kernel = weight_dict['kernel']
@@ -94,6 +91,9 @@ class YOLO_V2_TINY(object):
                 tensor_list.append(x)
 
                 return x
+
+            x = tf.compat.v1.placeholder(tf.float32, shape=in_shape)
+            input_tensor = x
 
             x = conv_bn_layer(x, weight_list[0])
             x = maxpool_layer(x, 2, 2)
