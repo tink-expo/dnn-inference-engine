@@ -63,8 +63,8 @@ def draw_output_frame(frame, label_boxes):
             int((lefttop[1] + rightbottom[1]) / 2))
         cv2.putText(
             frame, best_class_name, text_pos, 
-            cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.7, 
-            color=color, thickness=2)
+            cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, 
+            color=color, thickness=1)
     return frame
 
 def video_object_detection(in_video_path, out_video_path, proc="cpu"):
@@ -90,8 +90,6 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     # 4. Save the intermediate values for the first frame.
     # Note that your input must be adjusted to fit into the algorithm,
     # including resizing the frame and changing the dimension.
-    
-    img_frame_ratio = None
 
     e2e_time = 0
     inference_time = 0
@@ -120,6 +118,7 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
 
         e2e_time += time.time() - e2e_time_start
 
+        # Exclude time for save_tensors in e2e time.
         if frame_count == 1:
             save_tensors(predictions)
 
