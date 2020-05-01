@@ -1,6 +1,6 @@
 /*
 !.gitignore
-!proj*.handout/
-proj*.handout/*
-!proj*.handout/*.py
-!proj*.handout/Dockerfile
+!cs492-projects/
+cs492-projects/proj*/*
+!cs492-projects/proj*/*.py
+!cs492-projects/proj1/Dockerfile
