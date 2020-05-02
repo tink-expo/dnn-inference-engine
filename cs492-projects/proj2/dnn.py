@@ -3,6 +3,11 @@ import sys
 import math
 import networkx as nx
 import numpy as np
+from multiprocessing import Pool
+
+import scipy.signal
+
+k_process_per_batch = 6
 
 class DnnInferenceEngine(object):
     def __init__(self, graph):
@@ -125,7 +130,37 @@ class Conv2D(DnnNode):
         print(name)
 
     def run(self):
-        pass
+        print("RUN " + self.name)
+        in_layer = self.in_node.result
+
+        in_layer = np.pad(
+                in_layer, 
+                [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
+                'constant')
+        
+        batch, out_height, out_width, out_channels = self.result.shape
+        filter_height, filter_width, in_channels, _ = self.kernel.shape
+
+        # def fft_conv(A, B):
+        #     return 
+
+
+        for b in np.arange(batch):
+            for d in np.arange(out_channels):
+                self.result[b, :, :, d].fill(0)
+                for c in np.arange(in_channels):
+                    for i in np.arange(out_height):
+                        for j in np.arange(out_width):
+                            for di in np.arange(filter_height):
+                                for dj in np.arange(filter_width):
+                                    self.result[b, i, j, d] += (
+                                        in_layer[b, self.strides[1] * i + di, self.strides[2] * j + dj, c] *
+                                        self.kernel[di, dj, c, d]
+                                    )
+        if self.name == 'conv2d_0':
+            print(self.result[:, :4, :4, 0])
+
+        
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -140,7 +175,8 @@ class BiasAdd(DnnNode):
         print(name)
 
     def run(self):
-        pass
+        self.result[:, :, :] = self.in_node.result[:, :, :] + self.biases
+
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -159,7 +195,20 @@ class MaxPool2D(DnnNode):
         print(name)
         
     def run(self):
+        # in_layer = self.in_node.result
+        # in_layer = np.pad(
+        #         in_layer, 
+        #         [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
+        #         'constant')
+        # in_height, in_width = in_layer.shape[1:3]
+        # kernel_height, kernel_width = self.ksize[1:3]
+        # new_height = in_height // kernel_height
+        # new_width = in_width // kernel_width
+        # new_shape = (new_height, kernel_height, new_width, kernel_width) + in_layer.shape[3:]
+        # for batch in range(in_layer.shape[0]):
+        #     self.result[batch,
         pass
+
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -179,18 +228,25 @@ class BatchNorm(DnnNode):
         
 
     def run(self):
-        pass
+        self.result[:, :, :] = ((
+                (self.in_node.result[:, :, :] - self.mean) / 
+                np.sqrt(self.variance + self.epsilon))
+                * self.gamma)
 
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
         self.result = np.zeros(in_node.result.shape, dtype='float32')
 
+        func = lambda t: 0.01 * t if t < 0 else t
+        self.vfunc = np.vectorize(func)
+
         self.name = name
         print(name)
 
     def run(self):
-        pass
+        self.result = self.vfunc(self.in_node.result)
+
 
 
 # Do not modify below
