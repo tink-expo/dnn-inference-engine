@@ -3,6 +3,7 @@ import sys
 import math
 import networkx as nx
 import numpy as np
+from numpy.fft  import fft2, ifft2
 from multiprocessing import Pool
 
 import scipy.signal
@@ -130,9 +131,7 @@ class Conv2D(DnnNode):
         print(name)
 
     def run(self):
-        print("RUN " + self.name)
         in_layer = self.in_node.result
-
         in_layer = np.pad(
                 in_layer, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
@@ -141,24 +140,24 @@ class Conv2D(DnnNode):
         batch, out_height, out_width, out_channels = self.result.shape
         filter_height, filter_width, in_channels, _ = self.kernel.shape
 
-        # def fft_conv(A, B):
-        #     return 
-
-
-        for b in np.arange(batch):
-            for d in np.arange(out_channels):
+        for b in range(batch):
+            for d in range(out_channels):
                 self.result[b, :, :, d].fill(0)
-                for c in np.arange(in_channels):
-                    for i in np.arange(out_height):
-                        for j in np.arange(out_width):
-                            for di in np.arange(filter_height):
-                                for dj in np.arange(filter_width):
-                                    self.result[b, i, j, d] += (
-                                        in_layer[b, self.strides[1] * i + di, self.strides[2] * j + dj, c] *
-                                        self.kernel[di, dj, c, d]
-                                    )
-        if self.name == 'conv2d_0':
-            print(self.result[:, :4, :4, 0])
+                for c in range(in_channels):
+                    self.result[b, :, :, d] += scipy.signal.correlate2d(in_layer[b, :, :, c], self.kernel[:, :, c, d], mode='valid')
+
+        # for b in range(batch):
+        #     for d in range(out_channels):
+        #         self.result[b, :, :, d].fill(0)
+        #         for c in range(in_channels):
+        #             for i in range(out_height):
+        #                 for j in range(out_width):
+        #                     for di in range(filter_height):
+        #                         for dj in range(filter_width):
+        #                             self.result[b, i, j, d] += (
+        #                                 in_layer[b, self.strides[1] * i + di, self.strides[2] * j + dj, c] *
+        #                                 self.kernel[di, dj, c, d]
+        #                             )
 
         
 
@@ -195,6 +194,24 @@ class MaxPool2D(DnnNode):
         print(name)
         
     def run(self):
+        in_layer = self.in_node.result
+        in_layer = np.pad(
+                in_layer, 
+                [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
+                'constant', constant_values=np.finfo('float32').min)
+        
+        batch, out_height, out_width, out_channels = self.result.shape
+
+        for b in range(batch):
+            for d in range(out_channels):
+                for i in range(out_height):
+                    for j in range(out_width):
+                        in_i = i * self.strides[1]
+                        in_j = j * self.strides[2]
+                        self.result[b, i, j, d] = np.max(
+                            in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d]
+                        )
+
         # in_layer = self.in_node.result
         # in_layer = np.pad(
         #         in_layer, 
@@ -207,7 +224,6 @@ class MaxPool2D(DnnNode):
         # new_shape = (new_height, kernel_height, new_width, kernel_width) + in_layer.shape[3:]
         # for batch in range(in_layer.shape[0]):
         #     self.result[batch,
-        pass
 
 
 class BatchNorm(DnnNode):
@@ -238,7 +254,7 @@ class LeakyReLU(DnnNode):
         self.in_node = in_node
         self.result = np.zeros(in_node.result.shape, dtype='float32')
 
-        func = lambda t: 0.01 * t if t < 0 else t
+        func = lambda t: 0.1 * t if t < 0 else t
         self.vfunc = np.vectorize(func)
 
         self.name = name
