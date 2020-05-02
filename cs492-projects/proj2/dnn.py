@@ -144,7 +144,23 @@ class Conv2D(DnnNode):
             for d in range(out_channels):
                 self.result[b, :, :, d].fill(0)
                 for c in range(in_channels):
-                    self.result[b, :, :, d] += scipy.signal.correlate2d(in_layer[b, :, :, c], self.kernel[:, :, c, d], mode='valid')
+                    for i in range(out_height):
+                        for di in range(filter_height):
+                            self.result[b, i, :, d] += (
+                                np.correlate(
+                                        in_layer[b, self.strides[1] * i + di, :, c], 
+                                        self.kernel[di, :, c, d])
+                            )
+
+        print(self.result[0, 0, :3, :4])
+
+        # for b in range(batch):
+        #     for d in range(out_channels):
+        #         self.result[b, :, :, d].fill(0)
+        #         for c in range(in_channels):
+        #             self.result[b, :, :, d] += scipy.signal.correlate2d(in_layer[b, :, :, c], self.kernel[:, :, c, d], mode='valid')
+
+        # print(self.result[0, 0, :3, :4])
 
         # for b in range(batch):
         #     for d in range(out_channels):

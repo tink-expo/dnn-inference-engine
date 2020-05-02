@@ -55,6 +55,7 @@ def draw_output_frame(frame, label_boxes):
 
     for lb in label_boxes:
         best_class_name, lefttop, rightbottom, color = lb
+        print(lefttop, rightbottom)
         lefttop = re_resize_pos(lefttop)
         rightbottom = re_resize_pos(rightbottom)
         frame = cv2.rectangle(frame, lefttop, rightbottom, color)
@@ -180,7 +181,7 @@ def main():
     else:
         proc = "cpu"
 
-    video_object_detection(in_video_path, out_video_path, proc)
+    photo_object_detection(in_video_path, out_video_path, proc)
 
 if __name__ == "__main__":
     main()
