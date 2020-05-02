@@ -3,12 +3,8 @@ import sys
 import math
 import networkx as nx
 import numpy as np
-from numpy.fft  import fft2, ifft2
-from multiprocessing import Pool
-
-import scipy.signal
-
-k_process_per_batch = 6
+import multiprocessing
+from itertools import repeat
 
 class DnnInferenceEngine(object):
     def __init__(self, graph):
@@ -107,6 +103,21 @@ class DnnNode(object):
 # Complete below classes.
 #
 
+def conv2d_work(bd, in_layer, kernel, strides, result_shape):
+    b, d = bd
+    filter_height, _, in_channels, _ = kernel.shape
+    _, out_height, out_width, _ = result_shape
+    res2d = np.zeros((out_height, out_width))
+    for c in range(in_channels):
+        for i in range(out_height):
+            for di in range(filter_height):
+                res2d[i, :] += (
+                    np.correlate(
+                            in_layer[b, strides[1] * i + di, :, c], 
+                            kernel[di, :, c, d])
+                )
+    return res2d
+
 class Conv2D(DnnNode):
     def __init__(self, name, in_node, kernel, strides, padding):
         batch, in_height, in_width, in_channels = in_node.result.shape
@@ -140,41 +151,21 @@ class Conv2D(DnnNode):
         batch, out_height, out_width, out_channels = self.result.shape
         filter_height, filter_width, in_channels, _ = self.kernel.shape
 
+        num_cores = multiprocessing.cpu_count()
+        pool = multiprocessing.Pool(num_cores)
+
+        bd_lst = []
         for b in range(batch):
             for d in range(out_channels):
-                self.result[b, :, :, d].fill(0)
-                for c in range(in_channels):
-                    for i in range(out_height):
-                        for di in range(filter_height):
-                            self.result[b, i, :, d] += (
-                                np.correlate(
-                                        in_layer[b, self.strides[1] * i + di, :, c], 
-                                        self.kernel[di, :, c, d])
-                            )
+                bd_lst.append((b, d))
 
-        print(self.result[0, 0, :3, :4])
-
-        # for b in range(batch):
-        #     for d in range(out_channels):
-        #         self.result[b, :, :, d].fill(0)
-        #         for c in range(in_channels):
-        #             self.result[b, :, :, d] += scipy.signal.correlate2d(in_layer[b, :, :, c], self.kernel[:, :, c, d], mode='valid')
-
-        # print(self.result[0, 0, :3, :4])
-
-        # for b in range(batch):
-        #     for d in range(out_channels):
-        #         self.result[b, :, :, d].fill(0)
-        #         for c in range(in_channels):
-        #             for i in range(out_height):
-        #                 for j in range(out_width):
-        #                     for di in range(filter_height):
-        #                         for dj in range(filter_width):
-        #                             self.result[b, i, j, d] += (
-        #                                 in_layer[b, self.strides[1] * i + di, self.strides[2] * j + dj, c] *
-        #                                 self.kernel[di, dj, c, d]
-        #                             )
-
+        work_results = pool.starmap(conv2d_work, zip(bd_lst, 
+                repeat(in_layer), repeat(self.kernel), repeat(self.strides), repeat(self.result.shape)))
+        pool.close()
+        pool.join()
+        for b in range(batch):
+            for d in range(out_channels):
+                self.result[b, :, :, d] = work_results[b * out_channels + d]
         
 
 class BiasAdd(DnnNode):
@@ -227,19 +218,6 @@ class MaxPool2D(DnnNode):
                         self.result[b, i, j, d] = np.max(
                             in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d]
                         )
-
-        # in_layer = self.in_node.result
-        # in_layer = np.pad(
-        #         in_layer, 
-        #         [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
-        #         'constant')
-        # in_height, in_width = in_layer.shape[1:3]
-        # kernel_height, kernel_width = self.ksize[1:3]
-        # new_height = in_height // kernel_height
-        # new_width = in_width // kernel_width
-        # new_shape = (new_height, kernel_height, new_width, kernel_width) + in_layer.shape[3:]
-        # for batch in range(in_layer.shape[0]):
-        #     self.result[batch,
 
 
 class BatchNorm(DnnNode):
