@@ -1,4 +1,5 @@
 import sys
+import os
 import numpy as np
 import cv2
 import time
@@ -14,7 +15,8 @@ def resize_input(im):
 def image_object_detection(in_image, out_image):
     frame = cv2.imread(in_image)
 
-    y2t = yolov2tiny.YOLO_V2_TINY([1, 416, 416, 3], "../../y2t_weights.pickle")
+    weight_pickle_path = os.path.join(os.getcwd(), 'y2t_weights.pickle')
+    y2t = yolov2tiny.YOLO_V2_TINY([1, 416, 416, 3], weight_pickle_path)
 
     t_end2end = time.time() 
 

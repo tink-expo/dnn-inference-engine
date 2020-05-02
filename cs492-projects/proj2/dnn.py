@@ -103,35 +103,91 @@ class DnnNode(object):
 
 class Conv2D(DnnNode):
     def __init__(self, name, in_node, kernel, strides, padding):
-        pass
+        batch, in_height, in_width, in_channels = in_node.result.shape
+        filter_height, filter_width, filter_in_channels, out_channels = kernel.shape
+        if filter_in_channels != in_channels:
+            raise ValueError
+
+        if not (padding == 'SAME' or padding == 'VALID'):
+            raise ValueError
+
+        out_height, self.pad_top, self.pad_bottom = get_out_pads(
+                in_height, filter_height, strides[1], padding)
+        out_width, self.pad_left, self.pad_right = get_out_pads(
+                in_width, filter_width, strides[2], padding)
+
+        self.in_node = in_node
+        self.kernel = kernel
+        self.strides = strides
+        self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
+
+        self.name = name
+        print(name)
 
     def run(self):
         pass
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
-        pass
+        if not (biases.ndim == 1 and in_node.result.shape[-1] == biases.shape[0]):
+            raise ValueError
+
+        self.in_node = in_node
+        self.biases = biases
+        self.result = np.zeros(in_node.result.shape, dtype='float32')
+
+        self.name = name
+        print(name)
 
     def run(self):
         pass
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
-        pass
+        batch, in_height, in_width, in_channels = in_node.result.shape
+        out_height, self.pad_top, self.pad_bottom = get_out_pads(
+                in_height, ksize[1], strides[1], padding)
+        out_width, self.pad_left, self.pad_right = get_out_pads(
+                in_width, ksize[2], strides[2], padding)
+
+        self.in_node = in_node
+        self.ksize = ksize
+        self.strides = strides
+        self.result = np.zeros((batch, out_height, out_width, in_channels), dtype='float32')
+
+        self.name = name
+        print(name)
         
     def run(self):
         pass
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
-        pass
+        if not all(arg.ndim == 1 and in_node.result.shape[-1] == arg.shape[0] 
+                for arg in [mean, variance, gamma]):
+            raise ValueError
+
+        self.in_node = in_node
+        self.mean = mean
+        self.variance = variance
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.result = np.zeros(in_node.result.shape, dtype='float32')
+
+        self.name = name
+        print(name)
+        
 
     def run(self):
         pass
 
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
-        pass
+        self.in_node = in_node
+        self.result = np.zeros(in_node.result.shape, dtype='float32')
+
+        self.name = name
+        print(name)
 
     def run(self):
         pass
@@ -150,4 +206,24 @@ class Input(DnnNode):
 
     def run(self):
         pass
+
+
+# Utility helper functions.
+
+def get_out_pads(in_size, filter_size, stride_size, padding):
+    assert padding == 'SAME' or padding == 'VALID'
+
+    if padding == 'SAME':
+        out_size = math.ceil(float(in_size) / float(stride_size))
+        pad_size = max(
+            (out_size - 1) * stride_size + filter_size - in_size, 0)
+        pad_front = pad_size // 2
+        pad_back = pad_size - pad_front
+
+    else:
+        out_size = math.ceil(float(in_size - filter_size + 1) / float(stride_size))
+        pad_front = 0
+        pad_back = 0
+
+    return out_size, pad_front, pad_back
 
