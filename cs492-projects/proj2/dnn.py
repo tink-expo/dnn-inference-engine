@@ -103,6 +103,40 @@ class DnnNode(object):
 # Complete below classes.
 #
 
+def get_out_pads(in_size, filter_size, stride_size, padding):
+    assert padding == 'SAME' or padding == 'VALID'
+
+    if padding == 'SAME':
+        out_size = math.ceil(float(in_size) / float(stride_size))
+        pad_size = max(
+            (out_size - 1) * stride_size + filter_size - in_size, 0)
+        pad_front = pad_size // 2
+        pad_back = pad_size - pad_front
+
+    else:
+        out_size = math.ceil(float(in_size - filter_size + 1) / float(stride_size))
+        pad_front = 0
+        pad_back = 0
+
+    return out_size, pad_front, pad_back
+
+def pre_multiprocessing(batch, out_channels):
+    num_cores = multiprocessing.cpu_count()
+    pool = multiprocessing.Pool(num_cores)
+
+    bd_lst = []
+    for b in range(batch):
+        for d in range(out_channels):
+            bd_lst.append((b, d))
+
+    return pool, bd_lst
+
+def post_multiprocessing(batch, out_channels, work_results, result):
+    for b in range(batch):
+        for d in range(out_channels):
+            result[b, :, :, d] = work_results[b * out_channels + d]
+
+
 def conv2d_work(bd, in_layer, kernel, strides, result_shape):
     b, d = bd
     filter_height, _, in_channels, _ = kernel.shape
@@ -114,8 +148,7 @@ def conv2d_work(bd, in_layer, kernel, strides, result_shape):
                 res2d[i, :] += (
                     np.correlate(
                             in_layer[b, strides[1] * i + di, :, c], 
-                            kernel[di, :, c, d])
-                )
+                            kernel[di, :, c, d]))
     return res2d
 
 class Conv2D(DnnNode):
@@ -151,22 +184,19 @@ class Conv2D(DnnNode):
         batch, out_height, out_width, out_channels = self.result.shape
         filter_height, filter_width, in_channels, _ = self.kernel.shape
 
-        num_cores = multiprocessing.cpu_count()
-        pool = multiprocessing.Pool(num_cores)
-
-        bd_lst = []
-        for b in range(batch):
-            for d in range(out_channels):
-                bd_lst.append((b, d))
+        pool, bd_lst = pre_multiprocessing(batch, out_channels)
 
         work_results = pool.starmap(conv2d_work, zip(bd_lst, 
                 repeat(in_layer), repeat(self.kernel), repeat(self.strides), repeat(self.result.shape)))
         pool.close()
         pool.join()
-        for b in range(batch):
-            for d in range(out_channels):
-                self.result[b, :, :, d] = work_results[b * out_channels + d]
-        
+
+        post_multiprocessing(batch, out_channels, work_results, self.result)
+
+
+def bias_add_work(bd, in_layer, bias):
+    b, d = bd
+    return in_layer[b, :, :, d] + bias
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -181,8 +211,28 @@ class BiasAdd(DnnNode):
         print(name)
 
     def run(self):
-        self.result[:, :, :] = self.in_node.result[:, :, :] + self.biases
+        batch, _, _, out_channels = self.result.shape
+        pool, bd_lst = pre_multiprocessing(batch, out_channels)
+        work_results = pool.starmap(bias_add_work, zip(bd_lst,
+                repeat(self.in_node.result), self.biases))
+        
+        pool.close()
+        pool.join()
 
+        post_multiprocessing(batch, out_channels, work_results, self.result)
+
+
+def max_pool2d_work(bd, in_layer, ksize, strides, result_shape):
+    b, d = bd
+    _, out_height, out_width, _ = result_shape
+    res2d = np.zeros((out_height, out_width))
+    for i in range(out_height):
+        for j in range(out_width):
+            in_i = i * strides[1]
+            in_j = j * strides[2]
+            res2d[i, j] = np.max(
+                in_layer[b, in_i:in_i+ksize[1], in_j:in_j+ksize[2], d])
+    return res2d
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -209,16 +259,19 @@ class MaxPool2D(DnnNode):
         
         batch, out_height, out_width, out_channels = self.result.shape
 
-        for b in range(batch):
-            for d in range(out_channels):
-                for i in range(out_height):
-                    for j in range(out_width):
-                        in_i = i * self.strides[1]
-                        in_j = j * self.strides[2]
-                        self.result[b, i, j, d] = np.max(
-                            in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d]
-                        )
+        pool, bd_lst = pre_multiprocessing(batch, out_channels)
+        work_results = pool.starmap(max_pool2d_work, zip(bd_lst,
+                repeat(in_layer), repeat(self.ksize), repeat(self.strides), repeat(self.result.shape)))
+        
+        pool.close()
+        pool.join()
 
+        post_multiprocessing(batch, out_channels, work_results, self.result)
+
+
+def batch_norm_work(bd, in_layer, mean, variance, gamma, epsilon):
+    b, d = bd
+    return ((in_layer[b, :, :, d] - mean) / np.sqrt(variance + epsilon)) * gamma
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -238,10 +291,23 @@ class BatchNorm(DnnNode):
         
 
     def run(self):
-        self.result[:, :, :] = ((
-                (self.in_node.result[:, :, :] - self.mean) / 
-                np.sqrt(self.variance + self.epsilon))
-                * self.gamma)
+        batch, _, _, out_channels = self.result.shape
+        pool, bd_lst = pre_multiprocessing(batch, out_channels)
+        work_results = pool.starmap(batch_norm_work, zip(bd_lst,
+                repeat(self.in_node.result), self.mean, self.variance, self.gamma, repeat(self.epsilon)))
+        
+        pool.close()
+        pool.join()
+
+        post_multiprocessing(batch, out_channels, work_results, self.result)
+
+
+leaky_relu_vfunc = np.vectorize(
+        lambda t: 0.1 * t if t < 0 else t)
+
+def leaky_relu_work(bd, in_layer):
+    b, d = bd
+    return leaky_relu_vfunc(in_layer[b, :, :, d])
 
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
@@ -255,7 +321,15 @@ class LeakyReLU(DnnNode):
         print(name)
 
     def run(self):
-        self.result = self.vfunc(self.in_node.result)
+        batch, _, _, out_channels = self.result.shape
+        pool, bd_lst = pre_multiprocessing(batch, out_channels)
+        work_results = pool.starmap(leaky_relu_work, zip(bd_lst,
+                repeat(self.in_node.result)))
+
+        pool.close()
+        pool.join()
+
+        post_multiprocessing(batch, out_channels, work_results, self.result)
 
 
 
@@ -272,24 +346,4 @@ class Input(DnnNode):
 
     def run(self):
         pass
-
-
-# Utility helper functions.
-
-def get_out_pads(in_size, filter_size, stride_size, padding):
-    assert padding == 'SAME' or padding == 'VALID'
-
-    if padding == 'SAME':
-        out_size = math.ceil(float(in_size) / float(stride_size))
-        pad_size = max(
-            (out_size - 1) * stride_size + filter_size - in_size, 0)
-        pad_front = pad_size // 2
-        pad_back = pad_size - pad_front
-
-    else:
-        out_size = math.ceil(float(in_size - filter_size + 1) / float(stride_size))
-        pad_front = 0
-        pad_back = 0
-
-    return out_size, pad_front, pad_back
 
