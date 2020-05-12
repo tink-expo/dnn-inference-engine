@@ -235,6 +235,9 @@ def max_pool2d_work(in_layer, ksize, strides, result_shape):
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
+        if not (padding == 'SAME' or padding == 'VALID'):
+            raise ValueError
+        
         batch, in_height, in_width, in_channels = in_node.result.shape
         out_height, self.pad_top, self.pad_bottom = get_out_pads(
                 in_height, ksize[1], strides[1], padding)
@@ -315,9 +318,6 @@ class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-
-        func = lambda t: 0.1 * t if t < 0 else t
-        self.vfunc = np.vectorize(func)
 
         self.name = name
         print(name)
