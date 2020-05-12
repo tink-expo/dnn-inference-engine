@@ -4,7 +4,7 @@ import math
 import networkx as nx
 import numpy as np
 import multiprocessing
-from itertools import repeat
+from itertools import cycle, islice, repeat
 
 class DnnInferenceEngine(object):
     def __init__(self, graph):
@@ -120,26 +120,22 @@ def get_out_pads(in_size, filter_size, stride_size, padding):
 
     return out_size, pad_front, pad_back
 
-def pre_multiprocessing(batch, out_channels):
+def multp_reshape(in_layer):
+    b, h, w, d = in_layer.shape
+    return in_layer.transpose(0, 3, 1, 2).reshape(b*d, h, w)
+
+def multp_pool():
     num_cores = multiprocessing.cpu_count()
-    pool = multiprocessing.Pool(num_cores)
+    return multiprocessing.Pool(num_cores)
 
-    bd_lst = []
-    for b in range(batch):
-        for d in range(out_channels):
-            bd_lst.append((b, d))
-
-    return pool, bd_lst
-
-def post_multiprocessing(batch, out_channels, work_results, result):
+def multp_post(batch, out_channels, work_results, result):
     for b in range(batch):
         for d in range(out_channels):
             result[b, :, :, d] = work_results[b * out_channels + d]
 
 
-def conv2d_work(bd, in_layer, kernel, strides, result_shape):
-    b, d = bd
-    filter_height, _, in_channels, _ = kernel.shape
+def conv2d_work(in_layer, kernel, strides, result_shape):
+    filter_height, _, in_channels = kernel.shape
     _, out_height, out_width, _ = result_shape
     res2d = np.zeros((out_height, out_width))
     for c in range(in_channels):
@@ -147,8 +143,8 @@ def conv2d_work(bd, in_layer, kernel, strides, result_shape):
             for di in range(filter_height):
                 res2d[i, :] += (
                     np.correlate(
-                            in_layer[b, strides[1] * i + di, :, c], 
-                            kernel[di, :, c, d]))
+                            in_layer[strides[1] * i + di, :, c], 
+                            kernel[di, :, c]))
     return res2d
 
 class Conv2D(DnnNode):
@@ -181,22 +177,23 @@ class Conv2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
         
-        batch, out_height, out_width, out_channels = self.result.shape
-        filter_height, filter_width, in_channels, _ = self.kernel.shape
+        batch, _, _, out_channels = self.result.shape
 
-        pool, bd_lst = pre_multiprocessing(batch, out_channels)
+        pool = multp_pool()
+        kernel_r = self.kernel.transpose(3, 0, 1, 2)
 
-        work_results = pool.starmap(conv2d_work, zip(bd_lst, 
-                repeat(in_layer), repeat(self.kernel), repeat(self.strides), repeat(self.result.shape)))
+        work_results = pool.starmap(conv2d_work, zip(
+                islice(cycle(in_layer), out_channels * batch), 
+                islice(cycle(kernel_r), out_channels * batch), 
+                repeat(self.strides), repeat(self.result.shape)))
         pool.close()
         pool.join()
 
-        post_multiprocessing(batch, out_channels, work_results, self.result)
+        multp_post(batch, out_channels, work_results, self.result)
 
 
-def bias_add_work(bd, in_layer, bias):
-    b, d = bd
-    return in_layer[b, :, :, d] + bias
+def bias_add_work(in_layer, bias):
+    return in_layer + bias
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -212,18 +209,20 @@ class BiasAdd(DnnNode):
 
     def run(self):
         batch, _, _, out_channels = self.result.shape
-        pool, bd_lst = pre_multiprocessing(batch, out_channels)
-        work_results = pool.starmap(bias_add_work, zip(bd_lst,
-                repeat(self.in_node.result), self.biases))
+
+        pool = multp_pool()
+        in_layer_r = multp_reshape(self.in_node.result)
+
+        work_results = pool.starmap(bias_add_work, zip(
+                in_layer_r, self.biases))
         
         pool.close()
         pool.join()
 
-        post_multiprocessing(batch, out_channels, work_results, self.result)
+        multp_post(batch, out_channels, work_results, self.result)
 
 
-def max_pool2d_work(bd, in_layer, ksize, strides, result_shape):
-    b, d = bd
+def max_pool2d_work(in_layer, ksize, strides, result_shape):
     _, out_height, out_width, _ = result_shape
     res2d = np.zeros((out_height, out_width))
     for i in range(out_height):
@@ -231,7 +230,7 @@ def max_pool2d_work(bd, in_layer, ksize, strides, result_shape):
             in_i = i * strides[1]
             in_j = j * strides[2]
             res2d[i, j] = np.max(
-                in_layer[b, in_i:in_i+ksize[1], in_j:in_j+ksize[2], d])
+                in_layer[in_i:in_i+ksize[1], in_j:in_j+ksize[2]])
     return res2d
 
 class MaxPool2D(DnnNode):
@@ -257,21 +256,22 @@ class MaxPool2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo('float32').min)
         
-        batch, out_height, out_width, out_channels = self.result.shape
+        batch, _, _, out_channels = self.result.shape
 
-        pool, bd_lst = pre_multiprocessing(batch, out_channels)
-        work_results = pool.starmap(max_pool2d_work, zip(bd_lst,
-                repeat(in_layer), repeat(self.ksize), repeat(self.strides), repeat(self.result.shape)))
+        pool = multp_pool()
+        in_layer_r = multp_reshape(in_layer)
+
+        work_results = pool.starmap(max_pool2d_work, zip(
+            in_layer_r, repeat(self.ksize), repeat(self.strides), repeat(self.result.shape)))
         
         pool.close()
         pool.join()
 
-        post_multiprocessing(batch, out_channels, work_results, self.result)
+        multp_post(batch, out_channels, work_results, self.result)
 
 
-def batch_norm_work(bd, in_layer, mean, variance, gamma, epsilon):
-    b, d = bd
-    return ((in_layer[b, :, :, d] - mean) / np.sqrt(variance + epsilon)) * gamma
+def batch_norm_work(in_layer, mean, variance, gamma, epsilon):
+    return ((in_layer - mean) / np.sqrt(variance + epsilon)) * gamma
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -292,22 +292,24 @@ class BatchNorm(DnnNode):
 
     def run(self):
         batch, _, _, out_channels = self.result.shape
-        pool, bd_lst = pre_multiprocessing(batch, out_channels)
-        work_results = pool.starmap(batch_norm_work, zip(bd_lst,
-                repeat(self.in_node.result), self.mean, self.variance, self.gamma, repeat(self.epsilon)))
+
+        pool = multp_pool()
+        in_layer_r = multp_reshape(self.in_node.result)
+
+        work_results = pool.starmap(batch_norm_work, zip(
+                in_layer_r, self.mean, self.variance, self.gamma, repeat(self.epsilon)))
         
         pool.close()
         pool.join()
 
-        post_multiprocessing(batch, out_channels, work_results, self.result)
+        multp_post(batch, out_channels, work_results, self.result)
 
 
 leaky_relu_vfunc = np.vectorize(
         lambda t: 0.1 * t if t < 0 else t)
 
-def leaky_relu_work(bd, in_layer):
-    b, d = bd
-    return leaky_relu_vfunc(in_layer[b, :, :, d])
+def leaky_relu_work(in_layer):
+    return leaky_relu_vfunc(in_layer)
 
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
@@ -322,14 +324,16 @@ class LeakyReLU(DnnNode):
 
     def run(self):
         batch, _, _, out_channels = self.result.shape
-        pool, bd_lst = pre_multiprocessing(batch, out_channels)
-        work_results = pool.starmap(leaky_relu_work, zip(bd_lst,
-                repeat(self.in_node.result)))
+
+        pool = multp_pool()
+        in_layer_r = multp_reshape(self.in_node.result)
+
+        work_results = pool.starmap(leaky_relu_work, zip(in_layer_r))
 
         pool.close()
         pool.join()
 
-        post_multiprocessing(batch, out_channels, work_results, self.result)
+        multp_post(batch, out_channels, work_results, self.result)
 
 
 
