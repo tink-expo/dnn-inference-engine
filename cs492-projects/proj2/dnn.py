@@ -103,6 +103,8 @@ class DnnNode(object):
 # Complete below classes.
 #
 
+# NOTE: We did "batch and out_channel"-wise parallelization using multiprocessing.
+
 def get_out_pads(in_size, filter_size, stride_size, padding):
     assert padding == 'SAME' or padding == 'VALID'
 
@@ -135,16 +137,27 @@ def multp_post(batch, out_channels, work_results, result):
 
 
 def conv2d_work(in_layer, kernel, strides, result_shape):
-    filter_height, _, in_channels = kernel.shape
+    filter_height, filter_width, in_channels = kernel.shape
     _, out_height, out_width, _ = result_shape
     res2d = np.zeros((out_height, out_width))
-    for c in range(in_channels):
-        for i in range(out_height):
-            for di in range(filter_height):
-                res2d[i, :] += (
-                    np.correlate(
-                            in_layer[strides[1] * i + di, :, c], 
-                            kernel[di, :, c]))
+    if strides[2] == 1:
+        for c in range(in_channels):
+            for i in range(out_height):
+                for di in range(filter_height):
+                    res2d[i] += (
+                        np.correlate(
+                                in_layer[strides[1] * i + di, :, c], 
+                                kernel[di, :, c]))
+    else:
+        for c in range(in_channels):
+            for i in range(out_height):
+                for j in range(out_width):
+                    for di in range(filter_height):
+                        for dj in range(filter_width):
+                            res2d[i, j] += (
+                                in_layer[strides[1] * i + di, strides[2] * j + dj, c] *
+                                kernel[di, dj, c]
+                            )
     return res2d
 
 class Conv2D(DnnNode):
