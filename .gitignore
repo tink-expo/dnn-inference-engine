@@ -1,6 +1,9 @@
 /*
 !.gitignore
 !cs492-projects/
-cs492-projects/proj*/*
-!cs492-projects/proj*/*.py
+cs492-projects/**/*.*
+!cs492-projects/**/*.py
+!cs492-projects/**/*.c
+!cs492-projects/**/*.cu
+
 !cs492-projects/proj1/Dockerfile
