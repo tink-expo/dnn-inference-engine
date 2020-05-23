@@ -159,48 +159,28 @@ class Conv2D(DnnNode):
 
     def run(self):
         print(self.name)
-        # in_layer = np.ascontiguousarray(self.in_node.result)
         in_layer = self.in_node.result
         in_layer = np.pad(
                 in_layer, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
-
-        batch, out_height, out_width, out_channels = self.result.shape
-        filter_height, filter_width, in_channels = self.kernel.shape[:3]
-        
-        for b in range(batch):
-            for d in range(out_channels):
-                for c in range(in_channels):
-                    self.result[b, :, :, d] += scipy.signal.correlate2d(
-                            in_layer[b, :, :, c], 
-                            self.kernel[:, :, c, d], mode='valid')
-        # print(self.result[:, :4, :4, 0])
-
-        _, ih, iw, ic = in_layer.shape
-        rr = in_layer.reshape(ih * iw * ic)
-        print(ih, iw)
-        print(in_layer[0, 2, 2, :20])
-        for i in range(20):
-            print(rr[2 * iw * ic + 2 * ic + i], end=" ")
-        print()
-
-
-        self.result2 = np.zeros(self.result.shape, dtype='float32')
         mylib.conv2d(in_layer.ctypes.data_as(c_float_pointer_type),
                 self.kernel.ctypes.data_as(c_float_pointer_type), 
-                self.result2.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape,
                 *in_layer.shape[1:],
                 *self.kernel.shape[:2],
-                *self.strides[1:3],
-                self.result.size, in_layer.size, self.kernel.size)
-
-        
-        # print(self.result2[:, :4, :4, 0])
-        # print(np.allclose(self.result, self.result2, atol=0.002, rtol=0))
-
-        # print(np.min(self.result), np.min(self.result2))
+                *self.strides[1:3])
+        batch, out_height, out_width, out_channels = self.result.shape
+        filter_height, filter_width, in_channels = self.kernel.shape[:3]
+        self.result2 = np.zeros(self.result.shape, dtype='float32')
+        for b in range(batch):
+            for d in range(out_channels):
+                for c in range(in_channels):
+                    self.result2[b, :, :, d] += scipy.signal.correlate2d(
+                            in_layer[b, :, :, c], 
+                            self.kernel[:, :, c, d], mode='valid')
+        print(np.allclose(self.result, self.result2, atol=0.002, rtol=0))
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -248,16 +228,22 @@ class MaxPool2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo('float32').min)
         
-        batch, out_height, out_width, out_channels = self.result.shape
-        for b in range(batch):
-            for d in range(out_channels):
-                for i in range(out_height):
-                    for j in range(out_width):
-                        in_i = i * self.strides[1]
-                        in_j = j * self.strides[2]
-                        self.result[b, i, j, d] = np.max(
-                            in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d]
-                        )
+        # batch, out_height, out_width, out_channels = self.result.shape
+        # for b in range(batch):
+        #     for d in range(out_channels):
+        #         for i in range(out_height):
+        #             for j in range(out_width):
+        #                 in_i = i * self.strides[1]
+        #                 in_j = j * self.strides[2]
+        #                 self.result[b, i, j, d] = np.max(
+        #                     in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d]
+        #                 )
+        mylib.max_pool2d(self.in_node.result.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
+                *self.result.shape,
+                *self.in_node.result.shape[1:],
+                *self.ksize[1:3],
+                *self.strides[1:3])
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -282,13 +268,6 @@ class BatchNorm(DnnNode):
                 np.sqrt(self.variance + self.epsilon))
                 * self.gamma)
 
-
-leaky_relu_vfunc = np.vectorize(
-        lambda t: 0.1 * t if t < 0 else t)
-
-def leaky_relu_work(in_layer):
-    return leaky_relu_vfunc(in_layer)
-
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
@@ -301,14 +280,6 @@ class LeakyReLU(DnnNode):
         mylib.leaky_relu(self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape)
-        # batch, out_height, out_width, out_channels = self.result.shape
-        # for b in range(batch):
-        #     for d in range(out_channels):
-        #         for i in range(out_height):
-        #             for j in range(out_width):
-        #                 t = self.in_node.result[b, i, j, d]
-        #                 self.result[b, i, j, d] = 0.1 * t if t < 0 else t
-
 
 
 # Do not modify below

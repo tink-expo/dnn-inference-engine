@@ -2,6 +2,8 @@
 #include "string.h"
 #include "stdio.h"
 
+#define MAX(x, y) (x > y ? x : y)
+
 void bias_add(float* in_layer, float* biases, float* result,
         int shape_b, int shape_h, int shape_w, int shape_d)
 {
@@ -38,82 +40,31 @@ void conv2d(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od,
         int ih, int iw, int ic,
-        int kernel_h, int kernel_w,
-        int stride_h, int stride_w,
-        int RS, int IS, int KS)
+        int kh, int kw,
+        int sh, int sw)
 {
-    printf("CONV2D %d %d %d\n", oh, ow, od);
-
-    printf("%d %d\n", iw, ic);
-    for (int i = 0; i < 20; ++i) {
-        printf("%f ", in_layer[2 * (iw * ic) + 2 * (ic) + i]);
-    }
-    printf("\n");
-    
     int count = 0;
     for (int b = 0; b < batch; ++b) {
         for (int d = 0; d < od; ++d) {
             for (int c = 0; c < ic; ++c) {
                 for (int i = 0; i < oh; ++i) {
                     for (int j = 0; j < ow; ++j) {
-                        for (int di = 0; di < kernel_h; ++di) {
-                            for (int dj = 0; dj < kernel_w; ++dj) {
+                        for (int di = 0; di < kh; ++di) {
+                            for (int dj = 0; dj < kw; ++dj) {
                                 int ri = b * (oh * ow * od) +
                                         i * (ow * od) +
                                         j * (od) +
                                         d;
-                                if (ri >= RS) {
-                                    printf("R\n");
-                                    printf("%d %d %d %d\n", b, i, j, d);
-                                    return;
-                                }
                                 int ii = b * (ih * iw * ic) +
-                                        (stride_h * i + di) * (iw * ic) +
-                                        (stride_w * j + dj) * ic +
+                                        (sh * i + di) * (iw * ic) +
+                                        (sw * j + dj) * ic +
                                         c;
-                                if (ii >= IS) {
-                                    printf("I\n");
-                                    printf("%d %d %d %d\n", b,stride_h * i + di, stride_w * j + dj, c);
-                                    return;
-                                }
-                                int ki = di * (kernel_w * ic * od) +
+                                int ki = di * (kw * ic * od) +
                                         dj * (ic * od) +
                                         c * od +
                                         d;
-                                if (ki >= KS) {
-                                    printf("K\n");
-                                    printf("%d %d %d %d\n", di, dj, c, d);
-                                    return;
-                                }
-
-
-                                // if (ri == 0) {
-                                //     printf("%f %f %f\n", result[ri], in_layer[ii], kernel[ki]);
-                                //     if (in_layer[ii] < -1000.0f) {
-                                //         printf("HERE\n");
-                                //         printf("%d %d %d %d\n", b,stride_h * i + di, stride_w * j + dj, c);
-                                //         printf("%d %d %d %d %d %d\n", stride_h, i, di, stride_w, j, dj);
-                                //         return;
-                                //     }
-                                // }
                                 
-                                result[
-                                        b * (oh * ow * od) +
-                                        i * (ow * od) +
-                                        j * (od) +
-                                        d
-                                ] += (
-                                in_layer[
-                                        b * (ih * iw * ic) +
-                                        (stride_h * i + di) * (iw * ic) +
-                                        (stride_w * j + dj) * ic +
-                                        c
-                                ] * kernel[
-                                        di * (kernel_w * ic * od) +
-                                        dj * (ic * od) +
-                                        c * od +
-                                        d
-                                ]);
+                                result[ri] += in_layer[ii] * kernel[ki];
                             }
                         }
                     }
@@ -122,6 +73,48 @@ void conv2d(float* in_layer,
         }
     }
 }
+
+void max_pool2d(float* in_layer,
+        float* result,
+        int batch, int oh, int ow, int od,
+        int ih, int iw, int ic,
+        int kh, int kw,
+        int sh, int sw)
+{
+    for (int b = 0; b < batch; ++b) {
+        for (int d = 0; d < od; ++d) {
+            for (int i = 0; i < oh; ++i) {
+                for (int j = 0; j < ow; ++j) {
+                    int in_i = i * sh;
+                    int in_j = j * sw;
+                    float imax = in_layer[
+                            b * (ih * iw * ic) +
+                            in_i * (iw * ic) +
+                            in_j * ic +
+                            d
+                    ];
+                    for (int di = 0; di < kh; ++di) {
+                        for (int dj = 0; dj < kw; ++dj) {
+                            imax = MAX(imax, in_layer[
+                                    b * (ih * iw * ic) +
+                                    (in_i + di) * (iw * ic) +
+                                    (in_j + dj) * ic +
+                                    d
+                            ]);
+                        }
+                    }
+                    result[
+                            b * (oh * ow * od) +
+                            i * (ow * od) +
+                            j * od +
+                            d
+                    ] = imax;
+                }
+            }
+        }
+    }
+}
+
 void leaky_relu(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od)
