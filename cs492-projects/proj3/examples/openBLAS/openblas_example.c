@@ -31,6 +31,15 @@ int main()
     };
     float C[X * Y] = { 0 };
 
+    cblas_sscal(
+        M * K,
+        2,
+        A,
+        1
+    );
+
+    print_mat("A", M, K, A);
+
     // M x K, K x N -> M x N (single precision, 's'gemm)
     // Save A x B in C starting from (1, 1)
     cblas_sgemm(

@@ -30,6 +30,7 @@ def image_object_detection(in_image, out_image, debug):
     frame = cv2.resize(frame, (416, 416), interpolation = cv2.INTER_CUBIC)
 
     for b in boxes:
+        print(b[1], b[2])
         frame = cv2.rectangle(frame, b[1], b[2], b[3])
         cv2.putText(frame, b[0], (int(min(b[1][0], b[2][0]) - 1), int(min(b[1][1], b[2][1])) - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, b[3], 1)
 

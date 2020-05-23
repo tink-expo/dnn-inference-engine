@@ -6,6 +6,14 @@ import numpy as np
 import multiprocessing
 from itertools import cycle, islice, repeat
 import scipy.signal
+import ctypes
+
+mylib = ctypes.cdll.LoadLibrary('./libdnnrun.so')
+
+c_float_pointer_type = ctypes.POINTER(ctypes.c_float)
+
+def get_ctype_shape(np_shape):
+    return tuple(map(ctypes.c_int, np_shape))
 
 class DnnInferenceEngine(object):
     def __init__(self, graph, debug):
@@ -228,26 +236,22 @@ class BiasAdd(DnnNode):
             raise ValueError
 
         self.in_node = in_node
+
         self.biases = biases
+        self.biases_p = self.biases.ctypes.data_as(c_float_pointer_type)
+
         self.result = np.zeros(in_node.result.shape, dtype='float32')
+        self.result_p = self.result.ctypes.data_as(c_float_pointer_type)
+
+        self.result_shape = get_ctype_shape(self.result.shape)
 
         self.name = name
         print(name)
 
     def run(self):
-        # batch, _, _, out_channels = self.result.shape
-
-        # pool = multp_pool()
-        # in_layer_r = multp_reshape(self.in_node.result)
-
-        # work_results = pool.starmap(bias_add_work, zip(
-        #         in_layer_r, self.biases))
-        
-        # pool.close()
-        # pool.join()
-
-        # multp_post(batch, out_channels, work_results, self.result)
-        self.result = self.in_node.result + self.biases
+        mylib.bias_add(self.in_node.result.ctypes.data_as(c_float_pointer_type), 
+                self.biases_p, self.result_p,
+                *self.result_shape)
 
 
 def max_pool2d_work(in_layer, ksize, strides, result_shape):
