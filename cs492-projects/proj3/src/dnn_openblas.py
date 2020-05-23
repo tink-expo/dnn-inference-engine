@@ -153,25 +153,18 @@ class Conv2D(DnnNode):
         self.kernel = kernel
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
 
     def run(self):
         print(self.name)
+        # in_layer = np.ascontiguousarray(self.in_node.result)
+        in_layer = self.in_node.result
         in_layer = np.pad(
-                self.in_node.result, 
+                in_layer, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
-        in_layer = np.ascontiguousarray(in_layer)
-        in_layer2 = np.pad(
-            self.in_node.result2, 
-                [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
-                'constant')
-        in_layer2 = np.ascontiguousarray(in_layer2)
-
-        print(np.allclose(in_layer, in_layer2, atol=0.002, rtol=0))
 
         batch, out_height, out_width, out_channels = self.result.shape
         filter_height, filter_width, in_channels = self.kernel.shape[:3]
@@ -182,8 +175,18 @@ class Conv2D(DnnNode):
                     self.result[b, :, :, d] += scipy.signal.correlate2d(
                             in_layer[b, :, :, c], 
                             self.kernel[:, :, c, d], mode='valid')
-        print(self.result[:, :4, :4, 0])
+        # print(self.result[:, :4, :4, 0])
 
+        _, ih, iw, ic = in_layer.shape
+        rr = in_layer.reshape(ih * iw * ic)
+        print(ih, iw)
+        print(in_layer[0, 2, 2, :20])
+        for i in range(20):
+            print(rr[2 * iw * ic + 2 * ic + i], end=" ")
+        print()
+
+
+        self.result2 = np.zeros(self.result.shape, dtype='float32')
         mylib.conv2d(in_layer.ctypes.data_as(c_float_pointer_type),
                 self.kernel.ctypes.data_as(c_float_pointer_type), 
                 self.result2.ctypes.data_as(c_float_pointer_type),
@@ -194,8 +197,10 @@ class Conv2D(DnnNode):
                 self.result.size, in_layer.size, self.kernel.size)
 
         
-        print(self.result2[:, :4, :4, 0])
-        print(np.allclose(self.result, self.result2, atol=0.002, rtol=0))
+        # print(self.result2[:, :4, :4, 0])
+        # print(np.allclose(self.result, self.result2, atol=0.002, rtol=0))
+
+        # print(np.min(self.result), np.min(self.result2))
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -206,7 +211,6 @@ class BiasAdd(DnnNode):
 
         self.biases = biases
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
@@ -216,11 +220,6 @@ class BiasAdd(DnnNode):
                 self.in_node.result.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
-                *self.result.shape)
-        mylib.bias_add(
-                self.in_node.result2.ctypes.data_as(c_float_pointer_type), 
-                self.biases.ctypes.data_as(c_float_pointer_type), 
-                self.result2.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape)
 
 class MaxPool2D(DnnNode):
@@ -238,7 +237,6 @@ class MaxPool2D(DnnNode):
         self.ksize = ksize
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, in_channels), dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
@@ -273,7 +271,6 @@ class BatchNorm(DnnNode):
         self.gamma = gamma
         self.epsilon = epsilon
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
@@ -282,10 +279,6 @@ class BatchNorm(DnnNode):
     def run(self):
         self.result = ((
                 (self.in_node.result - self.mean) / 
-                np.sqrt(self.variance + self.epsilon))
-                * self.gamma)
-        self.result2 = ((
-                (self.in_node.result2 - self.mean) / 
                 np.sqrt(self.variance + self.epsilon))
                 * self.gamma)
 
@@ -300,14 +293,21 @@ class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
 
     def run(self):
-        self.result = leaky_relu_vfunc(self.in_node.result)
-        self.result2 = leaky_relu_vfunc(self.in_node.result2)
+        mylib.leaky_relu(self.in_node.result.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
+                *self.result.shape)
+        # batch, out_height, out_width, out_channels = self.result.shape
+        # for b in range(batch):
+        #     for d in range(out_channels):
+        #         for i in range(out_height):
+        #             for j in range(out_width):
+        #                 t = self.in_node.result[b, i, j, d]
+        #                 self.result[b, i, j, d] = 0.1 * t if t < 0 else t
 
 
 
@@ -317,12 +317,10 @@ class Input(DnnNode):
         self.name = name
         self.in_shape = in_shape 
         self.result = np.ndarray(self.in_shape)
-        self.result2 = copy.deepcopy(self.result)
 
     def set_input(self, tensor):
         assert tuple(self.in_shape) == tuple(tensor.shape)
         self.result = tensor
-        self.result2 = copy.deepcopy(self.result)
 
     def run(self):
         pass

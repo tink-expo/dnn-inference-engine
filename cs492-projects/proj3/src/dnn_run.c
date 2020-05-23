@@ -42,6 +42,14 @@ void conv2d(float* in_layer,
         int stride_h, int stride_w,
         int RS, int IS, int KS)
 {
+    printf("CONV2D %d %d %d\n", oh, ow, od);
+
+    printf("%d %d\n", iw, ic);
+    for (int i = 0; i < 20; ++i) {
+        printf("%f ", in_layer[2 * (iw * ic) + 2 * (ic) + i]);
+    }
+    printf("\n");
+    
     int count = 0;
     for (int b = 0; b < batch; ++b) {
         for (int d = 0; d < od; ++d) {
@@ -78,10 +86,16 @@ void conv2d(float* in_layer,
                                     return;
                                 }
 
-                                if (count <= 3) {
-                                    printf("%f %f %f\n", result[ri], in_layer[ii], kernel[ki]);
-                                    ++count;
-                                }
+
+                                // if (ri == 0) {
+                                //     printf("%f %f %f\n", result[ri], in_layer[ii], kernel[ki]);
+                                //     if (in_layer[ii] < -1000.0f) {
+                                //         printf("HERE\n");
+                                //         printf("%d %d %d %d\n", b,stride_h * i + di, stride_w * j + dj, c);
+                                //         printf("%d %d %d %d %d %d\n", stride_h, i, di, stride_w, j, dj);
+                                //         return;
+                                //     }
+                                // }
                                 
                                 result[
                                         b * (oh * ow * od) +
@@ -103,6 +117,25 @@ void conv2d(float* in_layer,
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+void leaky_relu(float* in_layer,
+        float* result,
+        int batch, int oh, int ow, int od)
+{
+    for (int b = 0; b < batch; ++b) {
+        for (int i = 0; i < oh; ++i) {
+            for (int j = 0; j < ow; ++j) {
+                for (int d = 0; d < od; ++d) {
+                    int idx = b * (oh * ow * od) +
+                            i * (ow * od) +
+                            j * od +
+                            d;
+                    float t = in_layer[idx];
+                    result[idx] = t < 0 ? 0.1 * t : t;
                 }
             }
         }
