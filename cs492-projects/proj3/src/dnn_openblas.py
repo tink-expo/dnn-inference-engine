@@ -3,10 +3,11 @@ import sys
 import math
 import networkx as nx
 import numpy as np
-import multiprocessing
+# import multiprocessing
 from itertools import cycle, islice, repeat
 import scipy.signal
 import ctypes
+import copy
 
 mylib = ctypes.cdll.LoadLibrary('./libdnnrun.so')
 
@@ -116,8 +117,6 @@ class DnnNode(object):
 # Complete below classes.
 #
 
-# NOTE: We did "batch and out_channel"-wise parallelization using multiprocessing.
-
 def get_out_pads(in_size, filter_size, stride_size, padding):
     assert padding == 'SAME' or padding == 'VALID'
 
@@ -134,44 +133,6 @@ def get_out_pads(in_size, filter_size, stride_size, padding):
         pad_back = 0
 
     return out_size, pad_front, pad_back
-
-def multp_reshape(in_layer):
-    b, h, w, d = in_layer.shape
-    return in_layer.transpose(0, 3, 1, 2).reshape(b*d, h, w)
-
-def multp_pool():
-    num_cores = multiprocessing.cpu_count()
-    return multiprocessing.Pool(num_cores)
-
-def multp_post(batch, out_channels, work_results, result):
-    for b in range(batch):
-        for d in range(out_channels):
-            result[b, :, :, d] = work_results[b * out_channels + d]
-
-
-def conv2d_work(in_layer, kernel, strides, result_shape):
-    filter_height, filter_width, in_channels = kernel.shape
-    _, out_height, out_width, _ = result_shape
-    res2d = np.zeros((out_height, out_width))
-    if strides[2] == 1:
-        for c in range(in_channels):
-            for i in range(out_height):
-                for di in range(filter_height):
-                    res2d[i] += (
-                        np.correlate(
-                                in_layer[strides[1] * i + di, :, c], 
-                                kernel[di, :, c]))
-    else:
-        for c in range(in_channels):
-            for i in range(out_height):
-                for j in range(out_width):
-                    for di in range(filter_height):
-                        for dj in range(filter_width):
-                            res2d[i, j] += (
-                                in_layer[strides[1] * i + di, strides[2] * j + dj, c] *
-                                kernel[di, dj, c]
-                            )
-    return res2d
 
 class Conv2D(DnnNode):
     def __init__(self, name, in_node, kernel, strides, padding):
@@ -192,43 +153,49 @@ class Conv2D(DnnNode):
         self.kernel = kernel
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
+        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
 
     def run(self):
         print(self.name)
-        in_layer = self.in_node.result
         in_layer = np.pad(
-                in_layer, 
+                self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
-        
-        batch, _, _, out_channels = self.result.shape
-        in_channels = self.kernel.shape[2]
+        in_layer = np.ascontiguousarray(in_layer)
+        in_layer2 = np.pad(
+            self.in_node.result2, 
+                [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
+                'constant')
+        in_layer2 = np.ascontiguousarray(in_layer2)
 
+        print(np.allclose(in_layer, in_layer2, atol=0.002, rtol=0))
+
+        batch, out_height, out_width, out_channels = self.result.shape
+        filter_height, filter_width, in_channels = self.kernel.shape[:3]
+        
         for b in range(batch):
             for d in range(out_channels):
                 for c in range(in_channels):
                     self.result[b, :, :, d] += scipy.signal.correlate2d(
                             in_layer[b, :, :, c], 
                             self.kernel[:, :, c, d], mode='valid')
+        print(self.result[:, :4, :4, 0])
 
-        # pool = multp_pool()
-        # kernel_r = self.kernel.transpose(3, 0, 1, 2)
+        mylib.conv2d(in_layer.ctypes.data_as(c_float_pointer_type),
+                self.kernel.ctypes.data_as(c_float_pointer_type), 
+                self.result2.ctypes.data_as(c_float_pointer_type),
+                *self.result.shape,
+                *in_layer.shape[1:],
+                *self.kernel.shape[:2],
+                *self.strides[1:3],
+                self.result.size, in_layer.size, self.kernel.size)
 
-        # work_results = pool.starmap(conv2d_work, zip(
-        #         islice(cycle(in_layer), out_channels * batch), 
-        #         islice(cycle(kernel_r), out_channels * batch), 
-        #         repeat(self.strides), repeat(self.result.shape)))
-        # pool.close()
-        # pool.join()
-
-        # multp_post(batch, out_channels, work_results, self.result)
-
-
-def bias_add_work(in_layer, bias):
-    return in_layer + bias
+        
+        print(self.result2[:, :4, :4, 0])
+        print(np.allclose(self.result, self.result2, atol=0.002, rtol=0))
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -238,32 +205,23 @@ class BiasAdd(DnnNode):
         self.in_node = in_node
 
         self.biases = biases
-        self.biases_p = self.biases.ctypes.data_as(c_float_pointer_type)
-
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-        self.result_p = self.result.ctypes.data_as(c_float_pointer_type)
-
-        self.result_shape = get_ctype_shape(self.result.shape)
+        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
 
     def run(self):
-        mylib.bias_add(self.in_node.result.ctypes.data_as(c_float_pointer_type), 
-                self.biases_p, self.result_p,
-                *self.result_shape)
-
-
-def max_pool2d_work(in_layer, ksize, strides, result_shape):
-    _, out_height, out_width, _ = result_shape
-    res2d = np.zeros((out_height, out_width))
-    for i in range(out_height):
-        for j in range(out_width):
-            in_i = i * strides[1]
-            in_j = j * strides[2]
-            res2d[i, j] = np.max(
-                in_layer[in_i:in_i+ksize[1], in_j:in_j+ksize[2]])
-    return res2d
+        mylib.bias_add(
+                self.in_node.result.ctypes.data_as(c_float_pointer_type), 
+                self.biases.ctypes.data_as(c_float_pointer_type), 
+                self.result.ctypes.data_as(c_float_pointer_type),
+                *self.result.shape)
+        mylib.bias_add(
+                self.in_node.result2.ctypes.data_as(c_float_pointer_type), 
+                self.biases.ctypes.data_as(c_float_pointer_type), 
+                self.result2.ctypes.data_as(c_float_pointer_type),
+                *self.result.shape)
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -280,6 +238,7 @@ class MaxPool2D(DnnNode):
         self.ksize = ksize
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, in_channels), dtype='float32')
+        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
@@ -291,22 +250,16 @@ class MaxPool2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo('float32').min)
         
-        batch, _, _, out_channels = self.result.shape
-
-        pool = multp_pool()
-        in_layer_r = multp_reshape(in_layer)
-
-        work_results = pool.starmap(max_pool2d_work, zip(
-            in_layer_r, repeat(self.ksize), repeat(self.strides), repeat(self.result.shape)))
-        
-        pool.close()
-        pool.join()
-
-        multp_post(batch, out_channels, work_results, self.result)
-
-
-def batch_norm_work(in_layer, mean, variance, gamma, epsilon):
-    return ((in_layer - mean) / np.sqrt(variance + epsilon)) * gamma
+        batch, out_height, out_width, out_channels = self.result.shape
+        for b in range(batch):
+            for d in range(out_channels):
+                for i in range(out_height):
+                    for j in range(out_width):
+                        in_i = i * self.strides[1]
+                        in_j = j * self.strides[2]
+                        self.result[b, i, j, d] = np.max(
+                            in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d]
+                        )
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -320,6 +273,7 @@ class BatchNorm(DnnNode):
         self.gamma = gamma
         self.epsilon = epsilon
         self.result = np.zeros(in_node.result.shape, dtype='float32')
+        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
@@ -330,18 +284,10 @@ class BatchNorm(DnnNode):
                 (self.in_node.result - self.mean) / 
                 np.sqrt(self.variance + self.epsilon))
                 * self.gamma)
-        # batch, _, _, out_channels = self.result.shape
-
-        # pool = multp_pool()
-        # in_layer_r = multp_reshape(self.in_node.result)
-
-        # work_results = pool.starmap(batch_norm_work, zip(
-        #         in_layer_r, self.mean, self.variance, self.gamma, repeat(self.epsilon)))
-        
-        # pool.close()
-        # pool.join()
-
-        # multp_post(batch, out_channels, work_results, self.result)
+        self.result2 = ((
+                (self.in_node.result2 - self.mean) / 
+                np.sqrt(self.variance + self.epsilon))
+                * self.gamma)
 
 
 leaky_relu_vfunc = np.vectorize(
@@ -354,23 +300,14 @@ class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
         self.result = np.zeros(in_node.result.shape, dtype='float32')
+        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         print(name)
 
     def run(self):
         self.result = leaky_relu_vfunc(self.in_node.result)
-        # batch, _, _, out_channels = self.result.shape
-
-        # pool = multp_pool()
-        # in_layer_r = multp_reshape(self.in_node.result)
-
-        # work_results = pool.starmap(leaky_relu_work, zip(in_layer_r))
-
-        # pool.close()
-        # pool.join()
-
-        # multp_post(batch, out_channels, work_results, self.result)
+        self.result2 = leaky_relu_vfunc(self.in_node.result2)
 
 
 
@@ -380,10 +317,12 @@ class Input(DnnNode):
         self.name = name
         self.in_shape = in_shape 
         self.result = np.ndarray(self.in_shape)
+        self.result2 = copy.deepcopy(self.result)
 
     def set_input(self, tensor):
         assert tuple(self.in_shape) == tuple(tensor.shape)
-        self.result = tensor 
+        self.result = tensor
+        self.result2 = copy.deepcopy(self.result)
 
     def run(self):
         pass
