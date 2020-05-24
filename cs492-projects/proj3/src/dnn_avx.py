@@ -6,7 +6,7 @@ import numpy as np
 import ctypes
 import copy
 
-mylib = ctypes.cdll.LoadLibrary('./libdnn_openblas.so')
+mylib = ctypes.cdll.LoadLibrary('./libdnn_avx.so')
 
 c_float_pointer_type = ctypes.POINTER(ctypes.c_float)
 
@@ -183,7 +183,7 @@ class BiasAdd(DnnNode):
 
         self.in_node = in_node
 
-        self.biases = biases
+        self.biases = np.ascontiguousarray(biases).astype(np.float32)
         self.result = np.zeros(in_node.result.shape, dtype='float32')
 
         self.name = name
