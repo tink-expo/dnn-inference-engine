@@ -159,25 +159,32 @@ class Conv2D(DnnNode):
                 in_width, filter_width, strides[2], padding)
 
         self.in_node = in_node
-        self.kernel = kernel
+        self.kernel = np.ascontiguousarray(kernel).astype(np.float32)
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
         self.result2 = copy.deepcopy(self.result)
 
         self.name = name
 
-        if self.name == 'conv2d_8':
-            # for c in range(3):
-            #     for d in range(3):
-            #         print(self.kernel[0, 0, c, d], end=" ")
+        # if self.name == 'conv2d_8':
+        #     for i in range(in_channels):
+        #         for j in range(out_channels):
+        #             kernel[0, 0, i, j] = i * out_channels + j
+        #     pk = np.zeros(kernel.shape, dtype='float32')
+        #     for i in range(in_channels):
+        #         for j in range(out_channels):
+        #             pk[0, 0, i, j] = i * out_channels + j
+        #     mylib.print_kernel_conv8(
+        #             np.ascontiguousarray(kernel).astype(np.float32).ctypes.data_as(c_float_pointer_type),
+        #             *map(ctypes.c_int, pk.shape))
+
+            # tk = self.kernel.reshape(in_channels * out_channels)
+            # print()
+            # for i in range(in_channels):
+            #     for j in range(out_channels):
+            #         print(tk[i * out_channels + j], end=" ")
             #     print()
-            tk = self.kernel.reshape(in_channels * out_channels)
-            print(out_channels, tk.shape)
-            for c in range(3):
-                for d in range(3):
-                    print(tk[c * out_channels + d], end=" ")
-                print()
-            print()
+            # print()
 
     def run(self):
         print(self.name)
@@ -212,8 +219,18 @@ class Conv2D(DnnNode):
                     print(tk[c * out_channels + d], end=" ")
                 print()
             print()
+            print(self.kernel.dtype)
 
-        mylib.conv2d(in_layer2.ctypes.data_as(c_float_pointer_type),
+        mylib.conv2d.argtypes = [
+                c_float_pointer_type,
+                c_float_pointer_type,
+                c_float_pointer_type,
+                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int,
+                ctypes.c_int, ctypes.c_int]
+        mylib.conv2d(
+                in_layer2.ctypes.data_as(c_float_pointer_type),
                 self.kernel.ctypes.data_as(c_float_pointer_type), 
                 self.result2.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape),
@@ -241,7 +258,7 @@ class BiasAdd(DnnNode):
     def run(self):
         print(self.name)
         self.result = self.in_node.result + self.biases
-        mylib.bias_add(
+        mylib.bias_add_cb(
                 self.in_node.result2.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result2.ctypes.data_as(c_float_pointer_type),
@@ -327,8 +344,16 @@ class BatchNorm(DnnNode):
                 (self.in_node.result - self.mean) / 
                 np.sqrt(self.variance + self.epsilon))
                 * self.gamma)
-        self.result2 = self.result
-        npc_path()
+        mylib.batch_norm(
+                self.in_node.result2.ctypes.data_as(c_float_pointer_type),
+                self.mean.ctypes.data_as(c_float_pointer_type),
+                self.variance.ctypes.data_as(c_float_pointer_type),
+                self.gamma.ctypes.data_as(c_float_pointer_type),
+                ctypes.c_float(self.epsilon),
+                self.result2.ctypes.data_as(c_float_pointer_type),
+                *map(ctypes.c_int, self.result.shape))
+        print(abs(self.result2 - np.load(npc_path())).max())
+
 
 leaky_relu_vfunc = np.vectorize(
         lambda t: 0.1 * t if t < 0 else t)
