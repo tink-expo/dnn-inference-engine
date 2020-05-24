@@ -162,6 +162,7 @@ def photo_object_detection(in_photo_path, out_photo_path, proc="cpu"):
     input_img = np.expand_dims(input_img, 0)
 
     predictions = model.inference(input_img)
+    save_tensors(predictions)
 
     label_boxes = yolov2tiny.postprocessing(predictions[-1])
     
