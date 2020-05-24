@@ -162,29 +162,8 @@ class Conv2D(DnnNode):
         self.kernel = np.ascontiguousarray(kernel).astype(np.float32)
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
-
-        # if self.name == 'conv2d_8':
-        #     for i in range(in_channels):
-        #         for j in range(out_channels):
-        #             kernel[0, 0, i, j] = i * out_channels + j
-        #     pk = np.zeros(kernel.shape, dtype='float32')
-        #     for i in range(in_channels):
-        #         for j in range(out_channels):
-        #             pk[0, 0, i, j] = i * out_channels + j
-        #     mylib.print_kernel_conv8(
-        #             np.ascontiguousarray(kernel).astype(np.float32).ctypes.data_as(c_float_pointer_type),
-        #             *map(ctypes.c_int, pk.shape))
-
-            # tk = self.kernel.reshape(in_channels * out_channels)
-            # print()
-            # for i in range(in_channels):
-            #     for j in range(out_channels):
-            #         print(tk[i * out_channels + j], end=" ")
-            #     print()
-            # print()
 
     def run(self):
         print(self.name)
@@ -193,54 +172,24 @@ class Conv2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
 
-        in_layer2 = np.pad(
-                self.in_node.result2, 
-                [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
-                'constant')
-        
-        batch, out_height, out_width, out_channels = self.result.shape
-        filter_height, filter_width, in_channels = self.kernel.shape[:3]
-        for b in range(batch):
-            for d in range(out_channels):
-                for c in range(in_channels):
-                    self.result[b, :, :, d] += scipy.signal.correlate2d(
-                            in_layer[b, :, :, c], 
-                            self.kernel[:, :, c, d], mode='valid')
-
-        if self.name == 'conv2d_8':
-            # for c in range(3):
-            #     for d in range(3):
-            #         print(self.kernel[0, 0, c, d], end=" ")
-            #     print()
-            tk = self.kernel.reshape(in_channels * out_channels)
-            print(out_channels, tk.shape)
-            for c in range(3):
-                for d in range(3):
-                    print(tk[c * out_channels + d], end=" ")
-                print()
-            print()
-            print(self.kernel.dtype)
-
-        mylib.conv2d.argtypes = [
-                c_float_pointer_type,
-                c_float_pointer_type,
-                c_float_pointer_type,
-                ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                ctypes.c_int, ctypes.c_int, ctypes.c_int,
-                ctypes.c_int, ctypes.c_int,
-                ctypes.c_int, ctypes.c_int]
+        # mylib.conv2d.argtypes = [
+        #         c_float_pointer_type,
+        #         c_float_pointer_type,
+        #         c_float_pointer_type,
+        #         ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        #         ctypes.c_int, ctypes.c_int, ctypes.c_int,
+        #         ctypes.c_int, ctypes.c_int,
+        #         ctypes.c_int, ctypes.c_int]
         mylib.conv2d(
-                in_layer2.ctypes.data_as(c_float_pointer_type),
+                in_layer.ctypes.data_as(c_float_pointer_type),
                 self.kernel.ctypes.data_as(c_float_pointer_type), 
-                self.result2.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape),
-                *map(ctypes.c_int, in_layer2.shape[1:]),
+                *map(ctypes.c_int, in_layer.shape[1:]),
                 *map(ctypes.c_int, self.kernel.shape[:2]),
                 *map(ctypes.c_int, self.strides[1:3]))
         nl = np.load(npc_path())
-        if self.name == 'conv2d_8': 
-            print(self.result2[0, :4, :4, 0])
-            print(nl[0, :4, :4, 0])
+        print(abs(self.result - nl).max())
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -251,19 +200,17 @@ class BiasAdd(DnnNode):
 
         self.biases = biases
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
 
     def run(self):
         print(self.name)
-        self.result = self.in_node.result + self.biases
-        mylib.bias_add_cb(
-                self.in_node.result2.ctypes.data_as(c_float_pointer_type), 
+        mylib.bias_add(
+                self.in_node.result.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
-                self.result2.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
-        print(abs(self.result2 - np.load(npc_path())).max())
+        print(abs(self.result - np.load(npc_path())).max())
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -280,7 +227,6 @@ class MaxPool2D(DnnNode):
         self.ksize = ksize
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, in_channels), dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         
@@ -290,36 +236,16 @@ class MaxPool2D(DnnNode):
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo('float32').min)
-        in_layer2 = np.pad(
-                self.in_node.result2, 
-                [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
-                'constant', constant_values=np.finfo('float32').min)
-        batch, out_height, out_width, out_channels = self.result.shape
-        for b in range(batch):
-            for d in range(out_channels):
-                for i in range(out_height):
-                    for j in range(out_width):
-                        in_i = i * self.strides[1]
-                        in_j = j * self.strides[2]
-                        # if d == 0 and i < 4 and j < 4:
-                        #     print(in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d])
-                        self.result[b, i, j, d] = np.max(
-                            in_layer[b, in_i:in_i+self.ksize[1], in_j:in_j+self.ksize[2], d]
-                        )
-        # in_layer2 = np.ascontiguousarray(in_layer2)
-        # if not all([e == 0 for e in [self.pad_top, self.pad_bottom, self.pad_left, self.pad_right]]):
-        #     print(in_layer2[0, :4, :4, 0])
-        mylib.max_pool2d(in_layer2.ctypes.data_as(c_float_pointer_type),
-                self.result2.ctypes.data_as(c_float_pointer_type),
+        mylib.max_pool2d(in_layer.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape,
-                *in_layer2.shape[1:],
+                *in_layer.shape[1:],
                 *self.ksize[1:3],
                 *self.strides[1:3],
                 self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
+
         nl = np.load(npc_path())
-        print(abs(self.result2 - nl).max())
-        # print(self.result2[:, :4, :4, 0])
-        # print(nl[:, :4, :4, 0])
+        print(abs(self.result - nl).max())
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -333,26 +259,22 @@ class BatchNorm(DnnNode):
         self.gamma = gamma
         self.epsilon = epsilon
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
         
 
     def run(self):
         print(self.name)
-        self.result = ((
-                (self.in_node.result - self.mean) / 
-                np.sqrt(self.variance + self.epsilon))
-                * self.gamma)
         mylib.batch_norm(
-                self.in_node.result2.ctypes.data_as(c_float_pointer_type),
+                self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.mean.ctypes.data_as(c_float_pointer_type),
                 self.variance.ctypes.data_as(c_float_pointer_type),
                 self.gamma.ctypes.data_as(c_float_pointer_type),
                 ctypes.c_float(self.epsilon),
-                self.result2.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
-        print(abs(self.result2 - np.load(npc_path())).max())
+
+        print(abs(self.result - np.load(npc_path())).max())
 
 
 leaky_relu_vfunc = np.vectorize(
@@ -362,17 +284,16 @@ class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
         self.result = np.zeros(in_node.result.shape, dtype='float32')
-        self.result2 = copy.deepcopy(self.result)
 
         self.name = name
 
     def run(self):
         print(self.name)
-        self.result = leaky_relu_vfunc(self.in_node.result)
-        mylib.leaky_relu(self.in_node.result2.ctypes.data_as(c_float_pointer_type),
-                self.result2.ctypes.data_as(c_float_pointer_type),
+        mylib.leaky_relu(self.in_node.result.ctypes.data_as(c_float_pointer_type),
+                self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
-        print(abs(self.result2 - np.load(npc_path())).max())
+
+        print(abs(self.result - np.load(npc_path())).max())
 
 
 # Do not modify below
@@ -381,12 +302,10 @@ class Input(DnnNode):
         self.name = name
         self.in_shape = in_shape 
         self.result = np.ndarray(self.in_shape)
-        self.result2 = copy.deepcopy(self.result)
 
     def set_input(self, tensor):
         assert tuple(self.in_shape) == tuple(tensor.shape)
         self.result = tensor
-        self.result2 = copy.deepcopy(self.result)
 
     def run(self):
         pass

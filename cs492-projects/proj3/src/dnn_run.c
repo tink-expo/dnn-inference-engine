@@ -6,39 +6,7 @@
 
 #define MAX(x, y) (x >= y ? x : y)
 
-void print_kernel_conv8(float* kernel,
-        int kh, int kw, int ic, int od)
-{
-    printf("PKCONV\n");
-    printf("%d %d %d %d\n", kh, kw, ic, od);
-    for (int i = 0; i < ic; ++i) {
-        for (int j = 0; j < od; ++j) {
-            printf("%f ", kernel[i * od + j]);
-        }
-        printf("\n");
-    }
-}
-
-
 void bias_add(float* in_layer, float* biases, float* result,
-        int ob, int oh, int ow, int od)
-{
-    for (int b = 0; b < ob; ++b) {
-        for (int i = 0; i < oh; ++i) {
-            for (int j = 0; j < ow; ++j) {
-                for (int d = 0; d < od; ++d) {
-                    int ri = b * (oh * ow * od) +
-                            i * (ow * od) +
-                            j * od +
-                            d;
-                    result[ri] = in_layer[ri] + biases[d];
-                }
-            }
-        }
-    }
-}
-
-void bias_add_cb(float* in_layer, float* biases, float* result,
         int shape_b, int shape_h, int shape_w, int shape_d)
 {
     cblas_scopy(
@@ -129,15 +97,6 @@ void conv2d(float* in_layer,
                         }
                     }
                 }
-                // if (od == 125 && c < 4 && d == 0) {
-                //     for (int pi = 0; pi < 4; ++pi) {
-                //         for (int pj = 0; pj < 4; ++pj) {
-                //             printf("%f ", result[pi * (ow * od) + pj * od]);
-                //         }
-                //         printf("\n");
-                //     }
-                //     printf("\n");
-                // }
             }
         }
     }
