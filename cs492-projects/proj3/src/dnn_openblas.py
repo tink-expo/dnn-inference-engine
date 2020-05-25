@@ -9,6 +9,7 @@ import copy
 mylib = ctypes.cdll.LoadLibrary('./libdnn_openblas.so')
 
 c_float_pointer_type = ctypes.POINTER(ctypes.c_float)
+c_int_pointer_type = ctypes.POINTER(ctypes.c_int)
 
 npc = 0
 def npc_path():
@@ -156,6 +157,13 @@ class Conv2D(DnnNode):
         self.kernel = np.ascontiguousarray(kernel).astype(np.float32)
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
+
+        self.args = np.array((
+            *self.result.shape,
+            in_height + self.pad_top + self.pad_bottom, in_width + self.pad_left + self.pad_right, in_channels,
+            *self.kernel.shape[:2],
+            *self.strides[1:3]),
+            dtype=np.int32)
 
         self.name = name
 

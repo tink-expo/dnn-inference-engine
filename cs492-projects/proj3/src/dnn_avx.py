@@ -9,6 +9,7 @@ import copy
 mylib = ctypes.cdll.LoadLibrary('./libdnn_avx.so')
 
 c_float_pointer_type = ctypes.POINTER(ctypes.c_float)
+c_int_pointer_type = ctypes.POINTER(ctypes.c_int)
 
 npc = 0
 def npc_path():
@@ -161,6 +162,13 @@ class Conv2D(DnnNode):
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, out_channels), dtype=np.dtype(np.float32, align=True))
 
+        self.args = np.array((
+            *self.result.shape,
+            in_height + self.pad_top + self.pad_bottom, in_width + self.pad_left + self.pad_right, in_channels,
+            *self.kernel.shape[:2],
+            *self.strides[1:3]),
+            dtype=np.int32)
+
         self.name = name
 
     def run(self):
@@ -173,10 +181,7 @@ class Conv2D(DnnNode):
                 in_layer.ctypes.data_as(c_float_pointer_type),
                 self.kernel.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
-                *map(ctypes.c_int, self.result.shape),
-                *map(ctypes.c_int, in_layer.shape[1:]),
-                *map(ctypes.c_int, self.kernel.shape[:2]),
-                *map(ctypes.c_int, self.strides[1:3]))
+                self.args.ctypes.data_as(c_int_pointer_type))
 
         npc_cmp_print(self.result)
 

@@ -98,53 +98,56 @@ void batch_norm(float* in_layer,
     }
 }
 
+struct conv2d_shape_arg {
+    int batch, oh, ow, od;
+    int ih, iw, ic;
+    int kh, kw;
+    int sh, sw;
+};
+
 void conv2d(float* in_layer, 
         float* kernel, 
         float* result,
-        int batch, int oh, int ow, int od,
-        int ih, int iw, int ic,
-        int kh, int kw,
-        int sh, int sw)
+        int* shape_arg_arr)
 {
-    
-    
-    for (int b = 0; b < batch; ++b) {
-        for (int i = 0; i < oh; ++i) {
-            for (int j = 0; j < ow; ++j) {
-                __m256 r_av[od / 8]; 
-                for (int d = 0; d <= od - 8; d += 8) {
+    struct conv2d_shape_arg* shape = (struct conv2d_shape_arg*) shape_arg_arr;
+    for (int b = 0; b < shape->batch; ++b) {
+        for (int i = 0; i < shape->oh; ++i) {
+            for (int j = 0; j < shape->ow; ++j) {
+                __m256 r_av[shape->od / 8]; 
+                for (int d = 0; d <= shape->od - 8; d += 8) {
                     r_av[d / 8] = _mm256_setzero_ps();
                 }
-                int r_idx = b * (oh * ow * od) +
-                        i * (ow * od) +
-                        j * od;
-                for (int c = 0; c < ic; ++c) {
-                    for (int di = 0; di < kh; ++di) {
-                        for (int dj = 0; dj < kw; ++dj) {
-                            int i_idx = b * (ih * iw * ic) +
-                                    (sh * i + di) * (iw * ic) +
-                                    (sw * j + dj) * ic +
+                int r_idx = b * (shape->oh * shape->ow * shape->od) +
+                        i * (shape->ow * shape->od) +
+                        j * shape->od;
+                for (int c = 0; c < shape->ic; ++c) {
+                    for (int di = 0; di < shape->kh; ++di) {
+                        for (int dj = 0; dj < shape->kw; ++dj) {
+                            int i_idx = b * (shape->ih * shape->iw * shape->ic) +
+                                    (shape->sh * i + di) * (shape->iw * shape->ic) +
+                                    (shape->sw * j + dj) * shape->ic +
                                     c;
-                            int k_idx = di * (kw * ic * od) +
-                                    dj * (ic * od) +
-                                    c * od;
+                            int k_idx = di * (shape->kw * shape->ic * shape->od) +
+                                    dj * (shape->ic * shape->od) +
+                                    c * shape->od;
                             int d;
-                            for (d = 0; d <= od - 8; d += 8) {                          
+                            for (d = 0; d <= shape->od - 8; d += 8) {                          
                                 __m256 in_av = _mm256_set1_ps(*(in_layer + i_idx));
                                 __m256 k_av = _mm256_loadu_ps(kernel + k_idx + d);
                                 __m256 cr_av = _mm256_mul_ps(in_av, k_av);
                                 r_av[d / 8] = _mm256_add_ps(r_av[d / 8], cr_av);
                             }
 
-                            if (d < od) {
-                                for (; d < od; ++d) {
+                            if (d < shape->od) {
+                                for (; d < shape->od; ++d) {
                                     result[r_idx + d] += in_layer[i_idx] * kernel[k_idx + d];
                                 }
                             }
                         }
                     }
                 }
-                for (int d = 0; d <= od - 8; d += 8) {
+                for (int d = 0; d <= shape->od - 8; d += 8) {
                     _mm256_storeu_ps(result + r_idx + d, r_av[d / 8]);
                 }
             }
