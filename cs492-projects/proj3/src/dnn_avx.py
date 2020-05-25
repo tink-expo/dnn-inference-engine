@@ -184,7 +184,7 @@ class BiasAdd(DnnNode):
         self.in_node = in_node
 
         self.biases = np.ascontiguousarray(biases).astype(np.float32)
-        self.result = np.zeros(in_node.result.shape, dtype='float32')
+        self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
 
