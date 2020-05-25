@@ -261,10 +261,6 @@ class BatchNorm(DnnNode):
 
         print(abs(self.result - np.load(npc_path())).max())
 
-
-leaky_relu_vfunc = np.vectorize(
-        lambda t: 0.1 * t if t < 0 else t)
-
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node

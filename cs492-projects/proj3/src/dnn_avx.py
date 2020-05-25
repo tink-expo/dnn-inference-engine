@@ -19,6 +19,10 @@ def npc_path():
 def npc_n():
     return './intermediate-1/layer_{}.npy'.format(npc - 1)
 
+def npc_cmp_print(result):
+    print(abs(result - np.load(npc_path())).max())
+    print()
+
 class DnnInferenceEngine(object):
     def __init__(self, graph, debug):
         self.g = graph
@@ -155,7 +159,7 @@ class Conv2D(DnnNode):
         self.in_node = in_node
         self.kernel = np.ascontiguousarray(kernel).astype(np.float32)
         self.strides = strides
-        self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
+        self.result = np.zeros((batch, out_height, out_width, out_channels), dtype=np.dtype(np.float32, align=True))
 
         self.name = name
 
@@ -173,8 +177,8 @@ class Conv2D(DnnNode):
                 *map(ctypes.c_int, in_layer.shape[1:]),
                 *map(ctypes.c_int, self.kernel.shape[:2]),
                 *map(ctypes.c_int, self.strides[1:3]))
-        nl = np.load(npc_path())
-        print(abs(self.result - nl).max())
+
+        npc_cmp_print(self.result)
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -195,7 +199,8 @@ class BiasAdd(DnnNode):
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
-        print(abs(self.result - np.load(npc_path())).max())
+        
+        npc_cmp_print(self.result)
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -211,7 +216,7 @@ class MaxPool2D(DnnNode):
         self.in_node = in_node
         self.ksize = ksize
         self.strides = strides
-        self.result = np.zeros((batch, out_height, out_width, in_channels), dtype='float32')
+        self.result = np.zeros((batch, out_height, out_width, in_channels), dtype=np.dtype(np.float32, align=True))
 
         self.name = name
         
@@ -220,7 +225,7 @@ class MaxPool2D(DnnNode):
         in_layer = np.pad(
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
-                'constant', constant_values=np.finfo('float32').min)
+                'constant', constant_values=np.finfo(np.float32).min)
         mylib.max_pool2d(in_layer.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape,
@@ -229,8 +234,7 @@ class MaxPool2D(DnnNode):
                 *self.strides[1:3],
                 self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
 
-        nl = np.load(npc_path())
-        print(abs(self.result - nl).max())
+        npc_cmp_print(self.result)
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -243,7 +247,7 @@ class BatchNorm(DnnNode):
         self.variance = variance
         self.gamma = gamma
         self.epsilon = epsilon
-        self.result = np.zeros(in_node.result.shape, dtype='float32')
+        self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
         
@@ -259,16 +263,12 @@ class BatchNorm(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
-        print(abs(self.result - np.load(npc_path())).max())
-
-
-leaky_relu_vfunc = np.vectorize(
-        lambda t: 0.1 * t if t < 0 else t)
+        npc_cmp_print(self.result)
 
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
-        self.result = np.zeros(in_node.result.shape, dtype='float32')
+        self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
 
@@ -278,7 +278,7 @@ class LeakyReLU(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
-        print(abs(self.result - np.load(npc_path())).max())
+        npc_cmp_print(self.result)
 
 
 # Do not modify below

@@ -37,7 +37,8 @@ int main()
     // Multiply 8 floats at a time
     __m256 evens = _mm256_set_ps(2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0);
     __m256 odds  = _mm256_set_ps(1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0);
-    __m256 res   = _mm256_mul_ps(evens, odds);
+    __m256i zeros = _mm256_setzero_si256();
+    __m128 res   = _mm256_cmp_ps(evens, odds, zeros);
 
     printf("evens: ");
     for (int i = 0; i < 8; i++) printf("%3.0f ", *(float *)&evens[i]);
@@ -47,17 +48,17 @@ int main()
     for (int i = 0; i < 8; i++) printf("%3.0f ", *(float *)&res[i]);
     printf("\n");
 
-    float a[24];
-    float b[24];
-    for (int i = 0; i < 24; ++i) {
-        a[i] = 1.0;
-        b[i] = 2.0;
-    }
-    float r[24] = {0};
+    // float a[24];
+    // float b[24];
+    // for (int i = 0; i < 24; ++i) {
+    //     a[i] = 1.0;
+    //     b[i] = 2.0;
+    // }
+    // float r[24] = {0};
 
-    avx(a, b, r, 24);
-    for (int i = 0; i < 24; ++i) {
-        printf("%.3f ", r[i]);
-    }
-    printf("\n");
+    // avx(a, b, r, 24);
+    // for (int i = 0; i < 24; ++i) {
+    //     printf("%.3f ", r[i]);
+    // }
+    // printf("\n");
 }

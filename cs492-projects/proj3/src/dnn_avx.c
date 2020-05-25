@@ -51,19 +51,47 @@ void batch_norm(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od)
 {
-    for (int d = 0; d < od; ++d) {
-        variance[d] = sqrt(variance[d] + epsilon);
+    __m256 alpha_av[od / 8];
+    __m256 beta_av[od / 8];
+
+    __m256 epsilon_av = _mm256_set1_ps(epsilon);
+
+    int d = 0;
+    for (d = 0; d <= od - 8; d += 8) {
+        __m256 variance_av = _mm256_loadu_ps(variance + d);
+        __m256 gamma_av = _mm256_loadu_ps(gamma + d);
+        __m256 mean_av = _mm256_loadu_ps(mean + d);
+
+        variance_av = _mm256_add_ps(variance_av, epsilon_av);
+        variance_av = _mm256_sqrt_ps(variance_av);
+        alpha_av[d / 8] = _mm256_div_ps(gamma_av, variance_av);
+        
+        beta_av[d / 8] = _mm256_mul_ps(alpha_av[d / 8], mean_av);
+    }
+    if (d < od) {
+        for (; d < od; ++d) {
+            variance[d] = sqrt(variance[d] + epsilon);
+            variance[d] = gamma[d] / variance[d];
+            mean[d] = -mean[d] * variance[d];
+        }
     }
 
     for (int b = 0; b < batch; ++b) {
         for (int i = 0; i < oh; ++i) {
             for (int j = 0; j < ow; ++j) {
-                for (int d = 0; d < od; ++d) {
-                    int ri = i * (ow * od) +
-                            j * od +
-                            d;
-                    result[ri] = ((in_layer[ri] - mean[d]) / variance[d]) 
-                            * gamma[d];
+                int r_idx = i * (ow * od) +
+                        j * od;
+                for (d = 0; d <= od - 8; d += 8) {
+                    __m256 in_av = _mm256_loadu_ps(in_layer + r_idx + d);
+                    __m256 r_av = _mm256_mul_ps(in_av, alpha_av[d / 8]);
+                    r_av = _mm256_sub_ps(r_av, beta_av[d / 8]);
+                    _mm256_storeu_ps(result + r_idx + d, r_av);
+                }
+                if (d < od) {
+                    for (; d < od; ++d) {
+                        result[r_idx + d] =
+                                in_layer[r_idx + d] * variance[d] - mean[d];
+                    }
                 }
             }
         }
@@ -78,6 +106,8 @@ void conv2d(float* in_layer,
         int kh, int kw,
         int sh, int sw)
 {
+    
+    
     for (int b = 0; b < batch; ++b) {
         for (int i = 0; i < oh; ++i) {
             for (int j = 0; j < ow; ++j) {
@@ -182,16 +212,26 @@ void leaky_relu(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od)
 {
+    __m256 const_01 = _mm256_set1_ps(0.1);
     for (int b = 0; b < batch; ++b) {
         for (int i = 0; i < oh; ++i) {
             for (int j = 0; j < ow; ++j) {
-                for (int d = 0; d < od; ++d) {
-                    int idx = b * (oh * ow * od) +
-                            i * (ow * od) +
-                            j * od +
-                            d;
-                    float t = in_layer[idx];
-                    result[idx] = t < 0 ? 0.1 * t : t;
+                int d;
+                int idx = b * (oh * ow * od) +
+                        i * (ow * od) +
+                        j * od;
+                for (d = 0; d < od; d += 8) {
+                    __m256 in_av = _mm256_loadu_ps(in_layer + idx + d);
+                    __m256 in_01 = _mm256_mul_ps(in_av, const_01);
+                    __m256 r_av = _mm256_max_ps(in_av, in_01);
+                    _mm256_storeu_ps(result + idx + d, r_av);
+                }
+
+                if (d < od) {
+                    for (; d < od; ++d) {
+                        float t = in_layer[idx + d];
+                        result[idx + d] = t < 0 ? 0.1 * t : t;
+                    } 
                 }
             }
         }
