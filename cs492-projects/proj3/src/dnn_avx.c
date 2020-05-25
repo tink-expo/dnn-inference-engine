@@ -78,35 +78,6 @@ void conv2d(float* in_layer,
         int kh, int kw,
         int sh, int sw)
 {
-    // for (int b = 0; b < batch; ++b) {
-    //     for (int i = 0; i < oh; ++i) {
-    //         for (int j = 0; j < ow; ++j) {
-    //             for (int c = 0; c < ic; ++c) {
-    //                 for (int di = 0; di < kh; ++di) {
-    //                     for (int dj = 0; dj < kw; ++dj) {
-    //                         for (int d = 0; d < od; ++d) {
-    //                             int ri = b * (oh * ow * od) +
-    //                                     i * (ow * od) +
-    //                                     j * od +
-    //                                     d;
-    //                             int ii = b * (ih * iw * ic) +
-    //                                     (sh * i + di) * (iw * ic) +
-    //                                     (sw * j + dj) * ic +
-    //                                     c;
-    //                             int ki = di * (kw * ic * od) +
-    //                                     dj * (ic * od) +
-    //                                     c * od +
-    //                                     d;
-                                
-    //                             result[ri] += in_layer[ii] * kernel[ki];
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
     for (int b = 0; b < batch; ++b) {
         for (int i = 0; i < oh; ++i) {
             for (int j = 0; j < ow; ++j) {
@@ -128,13 +99,11 @@ void conv2d(float* in_layer,
                                     dj * (ic * od) +
                                     c * od;
                             int d;
-                            for (d = 0; d <= od - 8; d += 8) {
-                                // __m256 r_av = _mm256_loadu_ps(result + r_idx + d);                                
+                            for (d = 0; d <= od - 8; d += 8) {                          
                                 __m256 in_av = _mm256_set1_ps(*(in_layer + i_idx));
                                 __m256 k_av = _mm256_loadu_ps(kernel + k_idx + d);
                                 __m256 cr_av = _mm256_mul_ps(in_av, k_av);
                                 r_av[d / 8] = _mm256_add_ps(r_av[d / 8], cr_av);
-                                // _mm256_storeu_ps(result + r_idx + d, r_av);
                             }
 
                             if (d < od) {
@@ -151,38 +120,6 @@ void conv2d(float* in_layer,
             }
         }
     }
-
-    // for (int b = 0; b < batch; ++b) {
-    //     for (int i = 0; i < oh; ++i) {
-    //         for (int j = 0; j < ow; ++j) {
-    //             for (int c = 0; c < ic; ++c) {
-    //                 for (int di = 0; di < kh; ++di) {
-    //                     for (int dj = 0; dj < kw; ++dj) {
-    //                         for (int d = 0; d < od; d += 8) {
-    //                             int ri = b * (oh * ow * od) +
-    //                                     i * (ow * od) +
-    //                                     j * od +
-    //                                     d;
-    //                             int ii = b * (ih * iw * ic) +
-    //                                     (sh * i + di) * (iw * ic) +
-    //                                     (sw * j + dj) * ic +
-    //                                     c;
-    //                             int ki = di * (kw * ic * od) +
-    //                                     dj * (ic * od) +
-    //                                     c * od +
-    //                                     d;
-    //                             for (int t = 0; t < 8; ++t) {
-    //                                 result[ri + t] +=
-    //                                         in_layer[ii] *
-    //                                         kernel[ki + t];
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
 }
 
 void max_pool2d(float* in_layer,
@@ -193,32 +130,48 @@ void max_pool2d(float* in_layer,
         int sh, int sw)
 {
     for (int b = 0; b < batch; ++b) {
-        for (int d = 0; d < od; ++d) {
-            for (int i = 0; i < oh; ++i) {
-                for (int j = 0; j < ow; ++j) {
-                    int in_i = i * sh;
-                    int in_j = j * sw;
-                    float imax = in_layer[
-                            b * (ih * iw * ic) +
-                            in_i * (iw * ic) +
-                            in_j * ic +
-                            d
-                    ];
+        for (int i = 0; i < oh; ++i) {
+            for (int j = 0; j < ow; ++j) {
+                int in_i = i * sh;
+                int in_j = j * sw;
+
+                int i_idx = b * (ih * iw * ic) +
+                        in_i * (iw * ic) +
+                        in_j * ic;
+                int r_idx = b * (oh * ow * od) +
+                        i * (ow * od) +
+                        j * od;
+                
+                int d;
+                for (d = 0; d <= od - 8; d += 8) {
+                    __m256 imax_av = _mm256_loadu_ps(in_layer + i_idx + d);
                     for (int di = 0; di < kh; ++di) {
                         for (int dj = 0; dj < kw; ++dj) {
-                            int ii = b * (ih * iw * ic) +
-                                    (in_i + di) * (iw * ic) +
-                                    (in_j + dj) * ic +
-                                    d;
-                            imax = MAX(imax, in_layer[ii]);
+                            __m256 icand_av = _mm256_loadu_ps(
+                                    in_layer + i_idx +
+                                    di * (iw * ic) +
+                                    dj * ic +
+                                    d);
+                            imax_av = _mm256_max_ps(imax_av, icand_av);
                         }
                     }
-                    result[
-                            b * (oh * ow * od) +
-                            i * (ow * od) +
-                            j * od +
-                            d
-                    ] = imax;
+                    _mm256_storeu_ps(result + r_idx + d, imax_av);
+                }
+
+                if (d < od) {
+                    for (; d < od; ++d) {
+                        float imax = in_layer[i_idx + d];
+                        for (int di = 0; di < kh; ++di) {
+                            for (int dj = 0; dj < kw; ++dj) {
+                                imax = MAX(imax, 
+                                        in_layer[i_idx +
+                                        di * (iw * ic) +
+                                        dj * ic +
+                                        d]);
+                            }
+                            result[r_idx + d] = imax;
+                        }
+                    }
                 }
             }
         }
