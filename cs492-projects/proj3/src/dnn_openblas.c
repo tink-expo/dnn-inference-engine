@@ -102,15 +102,108 @@ void conv2d(float* in_layer,
     }
 }
 
-void conv2d_win(float* in_layer, 
-        float* r_kernel, 
+void conv2d_arr(float* in_layer_arg, 
+        float* kernel_arg, 
+        float* result_arg,
+        int batch, int oh, int ow, int od,
+        int ih, int iw, int ic,
+        int kh, int kw,
+        int sh, int sw)
+{
+    float (*in_layer)[ih][iw][ic] = (float (*)[ih][iw][ic]) in_layer_arg;
+    float (*kernel)[kw][ic][od] = (float (*)[kw][ic][od]) kernel_arg;
+    float (*result)[oh][ow][od] = (float (*)[oh][ow][od]) result_arg;
+    for (int b = 0; b < batch; ++b) {
+        for (int d = 0; d < od; ++d) {
+            for (int c = 0; c < ic; ++c) {
+                for (int i = 0; i < oh; ++i) {
+                    for (int j = 0; j < ow; ++j) {
+                        for (int di = 0; di < kh; ++di) {
+                            for (int dj = 0; dj < kw; ++dj) {
+                                // int ri = b * (oh * ow * od) +
+                                //         i * (ow * od) +
+                                //         j * od +
+                                //         d;
+                                // int ii = b * (ih * iw * ic) +
+                                //         (sh * i + di) * (iw * ic) +
+                                //         (sw * j + dj) * ic +
+                                //         c;
+                                // int ki = di * (kw * ic * od) +
+                                //         dj * (ic * od) +
+                                //         c * od +
+                                //         d;
+                                
+                                result[b][i][j][d] += 
+                                        in_layer[b][sh * i + di][sw * j + dj][c] * 
+                                        kernel[di][dj][c][d];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void im2col(float* imb_arg,
+        float* colb_arg,
+        int oh, int ow,
+        int ih, int iw, int ic,
+        int kh, int kw, 
+        int sh, int sw)
+{
+    float (*imb)[iw][ic] = (float (*)[iw][ic]) imb_arg;
+    float (*colb)[ic * kh * kw] = (float (*)[ic * kh * kw]) colb_arg;
+
+    for (int i = 0; i < oh; ++i) {
+        for (int j = 0; j < ow; ++j) {
+            int patch_i = i * sh;
+            int patch_j = j * sw;
+            for (int c = 0; c < ic; ++c) {
+                int col_i = i * ow + j;
+                int col_j = c * (kh * kw);
+                for (int k = 0; k < kh * kw; ++k) {
+                    colb[col_i][col_j + k] = imb[patch_i + k / kw][patch_j + k % kw][c];
+                }
+            }
+        }
+    }
+}
+
+void conv2d_mul(float* in_layer,
+        float* col,
+        float* kernel_r, 
         float* result,
         int batch, int oh, int ow, int od,
         int ih, int iw, int ic,
         int kh, int kw,
         int sh, int sw)
 {
-    
+    for (int b = 0; b < batch; ++b) {
+        float* imb = in_layer + b * (oh * ow * od);
+        float* colb = col + b * ((oh * ow) * (ic * kh * kw));
+        float* resultb = result + b * (oh * ow * od);
+
+        im2col(imb,
+                colb,
+                oh, ow,
+                ih, iw, ic,
+                kh, kw,
+                sh, sw);
+
+        // colb : (oh * ow) X (ic * kh * kw)
+        // kernel_r : (ic * kh * kw) X od
+
+        cblas_sgemm(
+            CblasRowMajor, CblasNoTrans, CblasNoTrans,
+            (oh * ow), od, (ic * kh * kw),
+            1,
+            colb, (ic * kh * kw),
+            kernel_r, od,
+            0,
+            resultb, od
+        );
+    }
 }
 
 void max_pool2d(float* in_layer,

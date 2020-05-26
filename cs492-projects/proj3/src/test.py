@@ -2,6 +2,7 @@ import numpy as np
 import scipy.signal
 import math
 import ctypes
+import time
 
 c_float_pointer_type = ctypes.POINTER(ctypes.c_float)
 c_int_pointer_type = ctypes.POINTER(ctypes.c_int)
@@ -60,18 +61,28 @@ def conv(im_shape, kernel_shape, strides):
     result1 = np.zeros((batch, oh, ow, od), dtype=np.float32)
     result2 = np.zeros(result1.shape, dtype=np.float32)
     result3 = np.zeros(result1.shape, dtype=np.float32)
-    
+    result4 = np.zeros(result1.shape, dtype=np.float32)
+
     im = np.ascontiguousarray(im)
     kernel = np.ascontiguousarray(kernel)
     result1 = np.ascontiguousarray(result1)
     reuslt2 = np.ascontiguousarray(result2)
     reuslt3 = np.ascontiguousarray(result3)
+    reuslt4 = np.ascontiguousarray(result4)
 
+    col = np.ascontiguousarray(np.zeros((batch, oh * ow, ic * kh * kw), dtype=np.float32))
+    kernel_r = np.ascontiguousarray(
+            kernel.transpose(2, 0, 1, 3).reshape(-1, od))
+
+    t = time.time()
     # 1. Scipy correlate2d
     for b in range(batch):
         for d in range(od):
             for c in range(ic):
                 result1[b, :, :, d] += scipy.signal.correlate2d(im[b,:,:,c], kernel[:,:,c,d], mode='valid')
+    print("#1")
+    print(t - time.time())
+    t = time.time()
 
     # 2. mylib
     mylib.conv2d(
@@ -82,21 +93,40 @@ def conv(im_shape, kernel_shape, strides):
             ih, iw, ic,
             kh, kw,
             sh, sw)
+    print("#2")
+    print(t - time.time())
+    t = time.time()        
 
     # 3. matmul
-    kernel_r = np.ascontiguousarray(
-            kernel.transpose(2, 0, 1, 3).reshape(-1, od))
+    imcol = None
     for b in range(batch):
         imb = im[b, :, :, :]
         imcol = im2col(imb, oh, ow, kh, kw, sh, sw)
         mul = imcol.dot(kernel_r)
         result3[b, :, :, :] = mul.reshape(oh, ow, od)
+    print("#3")
+    print(t - time.time())
+    t = time.time()
 
-    return result1, result2, result3
+    # 4. openblas-matmul
+    
+    mylib.conv2d_mul(
+            im.ctypes.data_as(c_float_pointer_type),
+            col.ctypes.data_as(c_float_pointer_type),
+            kernel_r.ctypes.data_as(c_float_pointer_type), 
+            result4.ctypes.data_as(c_float_pointer_type),
+            batch, oh, ow, od,
+            ih, iw, ic,
+            kh, kw,
+            sh, sw)
+    print("#4")
+    print(t - time.time())
+    t = time.time()  
+
+    return result1, result2, result3, result4, imcol, col
         
 
 
 
-r1, r2, r3 = conv((1, 416, 416, 3), (3, 3, 3, 16), strides=[1, 1, 1, 1])
-print(abs(r1 - r2).max())
-print(abs(r1 - r3).max())
+r1, r2, r3, r4, c1, c2 = conv((1, 13, 13, 1024), (3, 3, 1024, 1024), strides=[1, 1, 1, 1])
+print(abs(r1 - r4).max())
