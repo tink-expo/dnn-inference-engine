@@ -102,6 +102,17 @@ void conv2d(float* in_layer,
     }
 }
 
+void conv2d_win(float* in_layer, 
+        float* r_kernel, 
+        float* result,
+        int batch, int oh, int ow, int od,
+        int ih, int iw, int ic,
+        int kh, int kw,
+        int sh, int sw)
+{
+    
+}
+
 void max_pool2d(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od,

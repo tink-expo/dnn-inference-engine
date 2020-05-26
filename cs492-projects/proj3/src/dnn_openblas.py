@@ -158,12 +158,8 @@ class Conv2D(DnnNode):
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, out_channels), dtype='float32')
 
-        self.args = np.array((
-            *self.result.shape,
-            in_height + self.pad_top + self.pad_bottom, in_width + self.pad_left + self.pad_right, in_channels,
-            *self.kernel.shape[:2],
-            *self.strides[1:3]),
-            dtype=np.int32)
+        self.r_kernel = np.ascontiguousarray(
+                kernel.reshape(-1, out_channels).astype(np.float32))
 
         self.name = name
 
