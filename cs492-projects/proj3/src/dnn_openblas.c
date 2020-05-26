@@ -120,19 +120,6 @@ void conv2d_arr(float* in_layer_arg,
                     for (int j = 0; j < ow; ++j) {
                         for (int di = 0; di < kh; ++di) {
                             for (int dj = 0; dj < kw; ++dj) {
-                                // int ri = b * (oh * ow * od) +
-                                //         i * (ow * od) +
-                                //         j * od +
-                                //         d;
-                                // int ii = b * (ih * iw * ic) +
-                                //         (sh * i + di) * (iw * ic) +
-                                //         (sw * j + dj) * ic +
-                                //         c;
-                                // int ki = di * (kw * ic * od) +
-                                //         dj * (ic * od) +
-                                //         c * od +
-                                //         d;
-                                
                                 result[b][i][j][d] += 
                                         in_layer[b][sh * i + di][sw * j + dj][c] * 
                                         kernel[di][dj][c][d];

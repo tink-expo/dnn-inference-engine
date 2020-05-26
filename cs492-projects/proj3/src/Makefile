@@ -1,4 +1,4 @@
-all: libdnn_openblas.so libdnn_avx.so libdnn_cublas.so
+all: libdnn_openblas.so libdnn_avx.so libdnn_cublas.so libdnn_cuda.so
 
 libdnn_openblas.so: dnn_openblas.c
 	gcc -shared -fPIC -o $@ $^ -lopenblas
@@ -8,6 +8,9 @@ libdnn_avx.so: dnn_avx.c
 
 libdnn_cublas.so: dnn_cublas.cu 
 	nvcc -Xcompiler -fPIC -shared -o $@ $^ -lcublas
+
+libdnn_cuda.so: dnn_cuda.cu 
+	nvcc -Xcompiler -fPIC -shared -o $@ $^
 
 clean:
 	rm -f *.so
