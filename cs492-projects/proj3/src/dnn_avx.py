@@ -248,10 +248,11 @@ class BatchNorm(DnnNode):
             raise ValueError
 
         self.in_node = in_node
-        self.mean = mean
-        self.variance = variance
-        self.gamma = gamma
-        self.epsilon = epsilon
+
+        denom = np.sqrt(variance + epsilon)
+        self.alpha = gamma / denom
+        self.beta = self.alpha * mean
+        
         self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
@@ -261,10 +262,8 @@ class BatchNorm(DnnNode):
         print(self.name)
         mylib.batch_norm(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type),
-                self.mean.ctypes.data_as(c_float_pointer_type),
-                self.variance.ctypes.data_as(c_float_pointer_type),
-                self.gamma.ctypes.data_as(c_float_pointer_type),
-                ctypes.c_float(self.epsilon),
+                self.alpha.ctypes.data_as(c_float_pointer_type),
+                self.beta.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 

@@ -176,7 +176,7 @@ class Conv2D(DnnNode):
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
-        mylib.conv2d_mul(
+        mylib.conv2d_cuda(
                 in_layer.ctypes.data_as(c_float_pointer_type),
                 self.col.ctypes.data_as(c_float_pointer_type),
                 self.kernel_r.ctypes.data_as(c_float_pointer_type), 
@@ -251,10 +251,11 @@ class BatchNorm(DnnNode):
             raise ValueError
 
         self.in_node = in_node
-        self.mean = mean
-        self.variance = variance
-        self.gamma = gamma
-        self.epsilon = epsilon
+
+        denom = np.sqrt(variance + epsilon)
+        self.alpha = gamma / denom
+        self.beta = self.alpha * mean
+        
         self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
@@ -262,12 +263,10 @@ class BatchNorm(DnnNode):
 
     def run(self):
         print(self.name)
-        mylib.batch_norm(
+        mylib.batch_norm_cuda(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type),
-                self.mean.ctypes.data_as(c_float_pointer_type),
-                self.variance.ctypes.data_as(c_float_pointer_type),
-                self.gamma.ctypes.data_as(c_float_pointer_type),
-                ctypes.c_float(self.epsilon),
+                self.alpha.ctypes.data_as(c_float_pointer_type),
+                self.beta.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
