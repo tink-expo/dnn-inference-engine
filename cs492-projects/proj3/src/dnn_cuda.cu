@@ -3,22 +3,22 @@
 #include "stdlib.h"
 #include "math.h"
 
-#define BLOCK_SIZE 16
-#define BLOCK_SQ_SIZE 256
+#define THREADS_2D 16
+#define THREADS_1D 256
 
 #define MAX(x, y) (x >= y ? x : y)
 
 __global__ void h_cuda_matmul(float* imcol, float* kernel, float* result, 
         int m_size, int n_size, int k_size)
 {
-    int r_idx = blockIdx.y * blockDim.y + threadIdx.y;
-    int c_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (r_idx < m_size && c_idx < n_size) {
+    int i_idx = blockIdx.y * blockDim.y + threadIdx.y;
+    int j_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i_idx < m_size && j_idx < n_size) {
         float res = 0.0f;
-        for (int i = 0; i < k_size; ++i) {
-            res += imcol[r_idx * k_size + i] * kernel[i * n_size + c_idx];
+        for (int k = 0; k < k_size; ++k) {
+            res += imcol[i_idx * k_size + k] * kernel[k * n_size + j_idx];
         }
-        result[r_idx * n_size + c_idx] = res;
+        result[i_idx * n_size + j_idx] = res;
     }
 }
 
@@ -32,15 +32,47 @@ __global__ void h_cuda_batch_norm(float* in_layer, float* alpha, float* beta, fl
     }
 }
 
-void im2col(float* imb_arg,
-    float* colb_arg,
+__global__ void h_cuda_max_pool2d(
+        float* in_layer, float* result,
+        int r_size, 
+        int oh, int ow, int od, 
+        int ih, int iw, int ic,
+        int kh, int kw,
+        int sh, int sw)
+{
+    int t_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t_idx < r_size) {
+        // Calc i, j, d.
+        int d = t_idx;
+        int i = d / (ow * od);
+        d -= i * (ow * od);
+        int j = d / od;
+        d -= j * od;
+        
+        int ii = (i * sh) * (iw * ic) + (j * sw) * ic + d;
+        
+        float imax = in_layer[ii];
+        for (int di = 0; di < kh; ++di) {
+            for (int dj = 0; dj < kw; ++dj) {
+                if (di > 0 || dj > 0) {
+                    imax = MAX(imax, 
+                            in_layer[ii + di * (iw * ic) + dj * ic]);
+                }
+            }
+        }
+        result[t_idx] = imax;
+    }
+}
+
+void im2col(float* im_b_arg,
+    float* col_b_arg,
     int oh, int ow,
     int ih, int iw, int ic,
     int kh, int kw, 
     int sh, int sw)
 {
-    float (*imb)[iw][ic] = (float (*)[iw][ic]) imb_arg;
-    float (*colb)[ic * kh * kw] = (float (*)[ic * kh * kw]) colb_arg;
+    float (*im_b)[iw][ic] = (float (*)[iw][ic]) im_b_arg;
+    float (*col_b)[ic * kh * kw] = (float (*)[ic * kh * kw]) col_b_arg;
 
     for (int i = 0; i < oh; ++i) {
         for (int j = 0; j < ow; ++j) {
@@ -50,7 +82,7 @@ void im2col(float* imb_arg,
                 int col_i = i * ow + j;
                 int col_j = c * (kh * kw);
                 for (int k = 0; k < kh * kw; ++k) {
-                    colb[col_i][col_j + k] = imb[patch_i + k / kw][patch_j + k % kw][c];
+                    col_b[col_i][col_j + k] = im_b[patch_i + k / kw][patch_j + k % kw][c];
                 }
             }
         }
@@ -69,18 +101,18 @@ void conv2d_cuda(float* in_layer,
         int sh, int sw)
 {
     for (int b = 0; b < batch; ++b) {
-        float* imb = in_layer + b * (oh * ow * od);
-        float* colb = col + b * ((oh * ow) * (ic * kh * kw));
-        float* resultb = result + b * (oh * ow * od);
+        float* im_b = in_layer + b * (oh * ow * od);
+        float* col_b = col + b * ((oh * ow) * (ic * kh * kw));
+        float* result_b = result + b * (oh * ow * od);
 
-        im2col(imb,
-                colb,
+        im2col(im_b,
+                col_b,
                 oh, ow,
                 ih, iw, ic,
                 kh, kw,
                 sh, sw);
 
-        // colb : (oh * ow) X (ic * kh * kw)
+        // col_b : (oh * ow) X (ic * kh * kw)
         // kernel_r : (ic * kh * kw) X od
 
         int m_size = oh * ow;
@@ -94,19 +126,20 @@ void conv2d_cuda(float* in_layer,
         cudaMalloc((void **) &d_kernel, sizeof(float) * k_size * n_size);
         cudaMalloc((void **) &d_result, sizeof(float) * m_size * k_size);
 
-        cudaMemcpy(d_imcol, colb, sizeof(float) * m_size * k_size, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_imcol, col_b, sizeof(float) * m_size * k_size, cudaMemcpyHostToDevice);
         cudaMemcpy(d_kernel, kernel_r, sizeof(float) * k_size * n_size, cudaMemcpyHostToDevice);
         
-        unsigned int grid_r = (m_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-        unsigned int grid_c = (k_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        // TODO: Optimize here for Yolov2tiny size
+        unsigned int grid_r = (m_size + THREADS_2D - 1) / THREADS_2D;
+        unsigned int grid_c = (k_size + THREADS_2D - 1) / THREADS_2D;
         dim3 grid_dim(grid_c, grid_r);
-        dim3 block_dim(BLOCK_SIZE, BLOCK_SIZE);
+        dim3 block_dim(THREADS_2D, THREADS_2D);
 
         h_cuda_matmul<<<grid_dim, block_dim>>>(d_imcol, d_kernel, d_result, m_size, n_size, k_size);
         cudaFree(d_imcol);
         cudaFree(d_kernel);
 
-        cudaMemcpy(resultb, d_result, sizeof(float) * m_size * n_size, cudaMemcpyDeviceToHost);
+        cudaMemcpy(result_b, d_result, sizeof(float) * m_size * n_size, cudaMemcpyDeviceToHost);
         cudaFree(d_result);
     }
 }
@@ -137,6 +170,8 @@ void batch_norm_cuda(float* in_layer,
     int batch, int oh, int ow, int od)
 {
     int r_size = batch * oh * ow * od;
+
+    // TODO: Re-examine the boundary.
     if (r_size < 1e+6) {
         for (int b = 0; b < batch; ++b) {
             for (int i = 0; i < oh; ++i) {
@@ -165,11 +200,10 @@ void batch_norm_cuda(float* in_layer,
         cudaMemcpy(d_in_layer, in_layer, sizeof(float) * r_size, cudaMemcpyHostToDevice);
         cudaMemcpy(d_alpha, alpha, sizeof(float) * od, cudaMemcpyHostToDevice);
         cudaMemcpy(d_beta, beta, sizeof(float) * od, cudaMemcpyHostToDevice);
-        cudaMemcpy(d_result, result, sizeof(float) * r_size, cudaMemcpyHostToDevice);
         
-        unsigned int grid_size = (r_size + BLOCK_SQ_SIZE - 1) / BLOCK_SQ_SIZE;
+        unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
         dim3 grid_dim(grid_size);
-        dim3 block_dim(BLOCK_SQ_SIZE);
+        dim3 block_dim(THREADS_1D);
 
         h_cuda_batch_norm<<<grid_dim, block_dim>>>(d_in_layer, d_alpha, d_beta, d_result, r_size, od);
         cudaFree(d_in_layer);
@@ -181,6 +215,8 @@ void batch_norm_cuda(float* in_layer,
     }
 }
 
+
+
 void max_pool2d(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od,
@@ -189,24 +225,17 @@ void max_pool2d(float* in_layer,
         int sh, int sw)
 {
     for (int b = 0; b < batch; ++b) {
-        for (int d = 0; d < od; ++d) {
-            for (int i = 0; i < oh; ++i) {
-                for (int j = 0; j < ow; ++j) {
-                    int in_i = i * sh;
-                    int in_j = j * sw;
-                    float imax = in_layer[
-                            b * (ih * iw * ic) +
-                            in_i * (iw * ic) +
-                            in_j * ic +
-                            d
-                    ];
+        for (int i = 0; i < oh; ++i) {
+            for (int j = 0; j < ow; ++j) {
+                for (int d = 0; d < od; ++d) {
+                    int ii = (i * sh) * (iw * ic) + (j * sw) * ic + d;
+                    float imax = in_layer[ii];
                     for (int di = 0; di < kh; ++di) {
                         for (int dj = 0; dj < kw; ++dj) {
-                            int ii = b * (ih * iw * ic) +
-                                    (in_i + di) * (iw * ic) +
-                                    (in_j + dj) * ic +
-                                    d;
-                            imax = MAX(imax, in_layer[ii]);
+                            if (di > 0 || dj > 0) {
+                                imax = MAX(imax, 
+                                        in_layer[ii + di * (iw * ic) + dj * ic]);
+                            }
                         }
                     }
                     result[
@@ -218,6 +247,81 @@ void max_pool2d(float* in_layer,
                 }
             }
         }
+    }
+}
+
+void max_pool2d_test(float* in_layer,
+    float* result,
+    int batch, int oh, int ow, int od,
+    int ih, int iw, int ic,
+    int kh, int kw,
+    int sh, int sw)
+{
+    for (int b = 0; b < batch; ++b) {
+        int r_size = oh * ow * od;
+
+        float* in_layer_b = in_layer + b * (ih * iw * ic);
+        float* result_b = result + b * (oh * ow * od);
+
+        for (int t_idx = 0; t_idx < r_size; ++t_idx) {
+            int d = t_idx;
+            int i = d / (ow * od);
+            d -= i * (ow * od);
+            int j = d / od;
+            d -= j * od;
+
+            int ii = (i * sh) * (iw * ic) + (j * sw) * ic + d;
+            float imax = in_layer_b[ii];
+            for (int di = 0; di < kh; ++di) {
+                for (int dj = 0; dj < kw; ++dj) {
+                    if (di > 0 || dj > 0) {
+                        imax = MAX(imax, 
+                                in_layer_b[ii + di * (iw * ic) + dj * ic]);
+                    }
+                }
+            }
+            result_b[t_idx] = imax;
+        }
+    }
+}
+
+void max_pool2d_cuda(float* in_layer,
+    float* result,
+    int batch, int oh, int ow, int od,
+    int ih, int iw, int ic,
+    int kh, int kw,
+    int sh, int sw)
+{
+    for (int b = 0; b < batch; ++b) {
+        int r_size = oh * ow * od;
+        int i_size = ih * iw * ic;
+
+        float* in_layer_b = in_layer + b * (ih * iw * ic);
+        float* result_b = result + b * (oh * ow * od);
+        
+        float* d_in_layer;
+        float* d_result;
+
+        cudaMalloc((void **) &d_in_layer, sizeof(float) * i_size);
+        cudaMalloc((void **) &d_result, sizeof(float) * r_size);
+
+        cudaMemcpy(d_in_layer, in_layer_b, sizeof(float) * i_size, cudaMemcpyHostToDevice);
+
+        unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
+        dim3 grid_dim(grid_size);
+        dim3 block_dim(THREADS_1D);
+
+        h_cuda_max_pool2d<<<grid_dim, block_dim>>>(
+                d_in_layer, d_result, 
+                r_size,
+                oh, ow, od, 
+                ih, iw, ic, 
+                kh, kw,
+                sh, sw);
+        cudaFree(d_in_layer);
+
+        cudaMemcpy(result_b, d_result, sizeof(float) * r_size, cudaMemcpyDeviceToHost);
+        cudaFree(d_result);
     }
 }
 

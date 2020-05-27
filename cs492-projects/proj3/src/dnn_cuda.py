@@ -5,6 +5,7 @@ import networkx as nx
 import numpy as np
 import ctypes
 import copy
+import time
 
 mylib = ctypes.cdll.LoadLibrary('./libdnn_cuda.so')
 
@@ -225,7 +226,6 @@ class MaxPool2D(DnnNode):
         self.ksize = ksize
         self.strides = strides
         self.result = np.zeros((batch, out_height, out_width, in_channels), dtype=np.dtype(np.float32, align=True))
-
         self.name = name
         
     def run(self):
@@ -234,7 +234,8 @@ class MaxPool2D(DnnNode):
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo(np.float32).min)
-        mylib.max_pool2d(in_layer.ctypes.data_as(c_float_pointer_type),
+        
+        mylib.max_pool2d_cuda(in_layer.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape,
                 *in_layer.shape[1:],
