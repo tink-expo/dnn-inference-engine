@@ -22,8 +22,18 @@ __global__ void h_cuda_matmul(float* imcol, float* kernel, float* result,
     }
 }
 
-__global__ void h_cuda_batch_norm(float* in_layer, float* alpha, float* beta, float* result,
+__global__ void h_cuda_batch_norm(float* alpha, float* beta, float* result,
         int r_size, int od)
+{
+    int t_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t_idx < r_size) {
+        int d = t_idx % od;
+        result[t_idx] = result[t_idx] * alpha[d] - beta[d];
+    }
+}
+
+__global__ void h_cuda_batch_norm2(float* in_layer, float* alpha, float* beta, float* result,
+    int r_size, int od)
 {
     int t_idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (t_idx < r_size) {
@@ -170,49 +180,65 @@ void batch_norm_cuda(float* in_layer,
     int batch, int oh, int ow, int od)
 {
     int r_size = batch * oh * ow * od;
+    memcpy(result, in_layer, sizeof(float) * r_size); 
 
-    // TODO: Re-examine the boundary.
-    if (r_size < 1e+6) {
-        for (int b = 0; b < batch; ++b) {
-            for (int i = 0; i < oh; ++i) {
-                for (int j = 0; j < ow; ++j) {
-                    for (int d = 0; d < od; ++d) {
-                        int ri = i * (ow * od) +
-                                j * od +
-                                d;
-                        result[ri] = in_layer[ri] * alpha[d] - beta[d];
-                    }
-                }
-            }
-        }
+    float* d_alpha;
+    float* d_beta;
+    float* d_result;
 
-    } else {
-        float* d_in_layer;
-        float* d_alpha;
-        float* d_beta;
-        float* d_result;
+    cudaMalloc((void **) &d_alpha, sizeof(float) * od);
+    cudaMalloc((void **) &d_beta, sizeof(float) * od);
+    cudaMalloc((void **) &d_result, sizeof(float) * r_size);
 
-        cudaMalloc((void **) &d_in_layer, sizeof(float) * r_size);
-        cudaMalloc((void **) &d_alpha, sizeof(float) * od);
-        cudaMalloc((void **) &d_beta, sizeof(float) * od);
-        cudaMalloc((void **) &d_result, sizeof(float) * r_size);
+    cudaMemcpy(d_result, result, sizeof(float) * r_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_alpha, alpha, sizeof(float) * od, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_beta, beta, sizeof(float) * od, cudaMemcpyHostToDevice);
+    
+    unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
+    dim3 grid_dim(grid_size);
+    dim3 block_dim(THREADS_1D);
 
-        cudaMemcpy(d_in_layer, in_layer, sizeof(float) * r_size, cudaMemcpyHostToDevice);
-        cudaMemcpy(d_alpha, alpha, sizeof(float) * od, cudaMemcpyHostToDevice);
-        cudaMemcpy(d_beta, beta, sizeof(float) * od, cudaMemcpyHostToDevice);
-        
-        unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
-        dim3 grid_dim(grid_size);
-        dim3 block_dim(THREADS_1D);
+    h_cuda_batch_norm<<<grid_dim, block_dim>>>(d_alpha, d_beta, d_result, r_size, od);
+    cudaFree(d_alpha);
+    cudaFree(d_beta);
 
-        h_cuda_batch_norm<<<grid_dim, block_dim>>>(d_in_layer, d_alpha, d_beta, d_result, r_size, od);
-        cudaFree(d_in_layer);
-        cudaFree(d_alpha);
-        cudaFree(d_beta);
+    cudaMemcpy(result, d_result, sizeof(float) * r_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_result);
+}
 
-        cudaMemcpy(result, d_result, sizeof(float) * r_size, cudaMemcpyDeviceToHost);
-        cudaFree(d_result);
-    }
+void batch_norm_cuda2(float* in_layer,
+    float* alpha,
+    float* beta,
+    float* result,
+    int batch, int oh, int ow, int od)
+{
+    int r_size = batch * oh * ow * od;
+
+    float* d_in_layer;
+    float* d_alpha;
+    float* d_beta;
+    float* d_result;
+
+    cudaMalloc((void **) &d_in_layer, sizeof(float) * r_size);
+    cudaMalloc((void **) &d_alpha, sizeof(float) * od);
+    cudaMalloc((void **) &d_beta, sizeof(float) * od);
+    cudaMalloc((void **) &d_result, sizeof(float) * r_size);
+
+    cudaMemcpy(d_in_layer, in_layer, sizeof(float) * r_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_alpha, alpha, sizeof(float) * od, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_beta, beta, sizeof(float) * od, cudaMemcpyHostToDevice);
+    
+    unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
+    dim3 grid_dim(grid_size);
+    dim3 block_dim(THREADS_1D);
+
+    h_cuda_batch_norm2<<<grid_dim, block_dim>>>(d_in_layer, d_alpha, d_beta, d_result, r_size, od);
+    cudaFree(d_in_layer);
+    cudaFree(d_alpha);
+    cudaFree(d_beta);
+
+    cudaMemcpy(result, d_result, sizeof(float) * r_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_result);
 }
 
 

@@ -20,9 +20,14 @@ def npc_path():
 def npc_n():
     return './intermediate-1/layer_{}.npy'.format(npc - 1)
 
-def npc_cmp_print(result):
-    print(abs(result - np.load(npc_path())).max())
-    print()
+def npc_cmp_print(obj):
+    pass
+    # print(obj.name)
+    # print(abs(obj.result - np.load(npc_path())).max())
+    # print()
+
+# TODO: Add layer print at init
+# TODO: DEBUG, NDEBUG
 
 class DnnInferenceEngine(object):
     def __init__(self, graph, debug):
@@ -172,7 +177,6 @@ class Conv2D(DnnNode):
         self.name = name
 
     def run(self):
-        print(self.name)
         in_layer = np.pad(
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
@@ -187,7 +191,7 @@ class Conv2D(DnnNode):
                 *map(ctypes.c_int, self.kernel.shape[:2]),
                 *map(ctypes.c_int, self.strides[1:3]))
 
-        npc_cmp_print(self.result)
+        npc_cmp_print(self)
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -202,14 +206,13 @@ class BiasAdd(DnnNode):
         self.name = name
 
     def run(self):
-        print(self.name)
         mylib.bias_add(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
         
-        npc_cmp_print(self.result)
+        npc_cmp_print(self)
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -229,7 +232,6 @@ class MaxPool2D(DnnNode):
         self.name = name
         
     def run(self):
-        print(self.name)
         in_layer = np.pad(
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
@@ -243,7 +245,7 @@ class MaxPool2D(DnnNode):
                 *self.strides[1:3],
                 self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
 
-        npc_cmp_print(self.result)
+        npc_cmp_print(self)
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -258,12 +260,11 @@ class BatchNorm(DnnNode):
         self.beta = self.alpha * mean
         
         self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
-
+        self.result2 = self.result.copy()
         self.name = name
         
 
     def run(self):
-        print(self.name)
         mylib.batch_norm_cuda(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.alpha.ctypes.data_as(c_float_pointer_type),
@@ -271,7 +272,7 @@ class BatchNorm(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
-        npc_cmp_print(self.result)
+        npc_cmp_print(self)
 
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
@@ -281,12 +282,11 @@ class LeakyReLU(DnnNode):
         self.name = name
 
     def run(self):
-        print(self.name)
         mylib.leaky_relu(self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
-        npc_cmp_print(self.result)
+        npc_cmp_print(self)
 
 
 # Do not modify below
