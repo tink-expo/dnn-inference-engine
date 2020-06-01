@@ -10,6 +10,7 @@ import time
 mylib = ctypes.cdll.LoadLibrary('./libdnn_cuda.so')
 
 c_float_pointer_type = ctypes.POINTER(ctypes.c_float)
+c_int_pointer_type = ctypes.POINTER(ctypes.c_int)
 
 npc = 0
 def npc_path():
@@ -173,8 +174,15 @@ class Conv2D(DnnNode):
         self.strides = strides
         self.result = np.zeros((batch, oh, ow, od), dtype='float32')
 
+        self.args = np.array((
+            *self.result.shape,
+            ih, iw, ic,
+            *self.kernel.shape[:2],
+            *self.strides[1:3]),
+            dtype=np.int32)
+
         self.kernel_r = np.ascontiguousarray(
-            kernel.transpose(2, 0, 1, 3).reshape(-1, od))
+                kernel.transpose(2, 0, 1, 3).reshape(-1, od))
         self.col = np.ascontiguousarray(
                 np.zeros((batch, oh * ow, ic * kh * kw), dtype=np.float32))
 
@@ -185,15 +193,12 @@ class Conv2D(DnnNode):
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
-        mylib.conv2d_cuda(
+        mylib.conv2d_cuda_pthread(
                 in_layer.ctypes.data_as(c_float_pointer_type),
                 self.col.ctypes.data_as(c_float_pointer_type),
                 self.kernel_r.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
-                *map(ctypes.c_int, self.result.shape),
-                *map(ctypes.c_int, in_layer.shape[1:]),
-                *map(ctypes.c_int, self.kernel.shape[:2]),
-                *map(ctypes.c_int, self.strides[1:3]))
+                self.args.ctypes.data_as(c_int_pointer_type))
 
         npc_cmp_print(self)
 

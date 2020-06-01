@@ -182,34 +182,23 @@ void conv2d_cuda_pthread(float* in_layer,
         float* col,
         float* kernel_r, 
         float* result,
-        int batch, int oh, int ow, int od,
-        int ih, int iw, int ic,
-        int kh, int kw,
-        int sh, int sw)
+        int* shape_arg_arr)
 {
-    for (int b = 0; b < batch; ++b) {
-        float* im_b = in_layer + b * (ih * iw * ic);
-        float* col_b = col + b * ((oh * ow) * (ic * kh * kw));
-        float* result_b = result + b * (oh * ow * od);
+    struct shape_arg* shape = (struct shape_arg*) shape_arg_arr;
+    
+    for (int b = 0; b < shape->batch; ++b) {
+        float* im_b = in_layer + b * (shape->ih * shape->iw * shape->ic);
+        float* col_b = col + b * ((shape->oh * shape->ow) * (shape->ic * shape->kh * shape->kw));
+        float* result_b = result + b * (shape->oh * shape->ow * shape->od);
 
         pthread_t threads[P_THREADS];
         struct im2col_thread_arg t_args[P_THREADS];
-        int oh_part_size = oh / P_THREADS;
-        struct shape_arg shape;
-        shape.batch = batch;
-        shape.oh = oh;
-        shape.ow = ow;
-        shape.ih = ih;
-        shape.iw = iw;
-        shape.ic = ic;
-        shape.kh = kh;
-        shape.kw = kw;
-        shape.sh = sh;
-        shape.sw = sw;
+        int oh_part_size = shape->oh / P_THREADS;
+        
 
         t_args[0].im_b = im_b;
         t_args[0].col_b = col_b;
-        t_args[0].shape = &shape;
+        t_args[0].shape = shape;
 
         int t_id;
 
@@ -219,7 +208,7 @@ void conv2d_cuda_pthread(float* in_layer,
             }
 
             int oh_s = oh_part_size * t_idx;
-            int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape.oh;
+            int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape->oh;
             
             t_args[t_idx].oh_s = oh_s;
             t_args[t_idx].oh_e = oh_e;
@@ -238,9 +227,9 @@ void conv2d_cuda_pthread(float* in_layer,
         // col_b : (oh * ow) X (ic * kh * kw)
         // kernel_r : (ic * kh * kw) X od
 
-        int m_size = oh * ow;
-        int n_size = od;
-        int k_size = ic * kh * kw;
+        int m_size = shape->oh * shape->ow;
+        int n_size = shape->od;
+        int k_size = shape->ic * shape->kh * shape->kw;
 
         float* d_imcol;
         float* d_kernel;

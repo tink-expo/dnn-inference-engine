@@ -9,7 +9,7 @@
 
 #define MAX(x, y) (x >= y ? x : y)
 
-#define NUM_THREADS 4
+#define P_THREADS 4
 
 void bias_add(float* in_layer, float* biases, float* result,
         int batch, int oh, int ow, int od)
@@ -99,6 +99,142 @@ struct conv2d_thread_arg {
     int oh_e;
 };
 
+struct im2col_thread_arg {
+    float* im_kernel_b;  // also used for kernel
+    float* col_b;
+    float* result_b;
+    struct shape_arg* shape;
+    int oh_s;
+    int oh_e;
+};
+
+void* conv2d_matmul_thread_func(void* thread_arg)
+{
+    struct im2col_thread_arg* arg = (struct im2col_thread_arg*) thread_arg;
+    struct shape_arg* shape = arg->shape;
+
+    // col_b : (oh * ow) X (ic * kh * kw)
+    // kernel_r : (ic * kh * kw) X od
+
+    int n_size = shape->od;
+    int k_size = shape->ic * shape->kh * shape->kw;
+
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < n_size; ++j) {
+            float res = 0.0f;
+            for (int k = 0; k < k_size; ++k) {
+                res += arg->col_b[i * k_size + k] * arg->im_kernel_b[k * n_size + j];
+            }
+            arg->result_b[i * n_size + j] = res;
+        }
+    }
+}
+
+void* im2col_thread_func(void* thread_arg)
+{
+    struct im2col_thread_arg* arg = (struct im2col_thread_arg*) thread_arg;
+    struct shape_arg* shape = arg->shape;
+
+    int col_w = shape->ic * shape->kh * shape->kw;
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < shape->ow; ++j) {
+            int patch_i = i * shape->sh;
+            int patch_j = j * shape->sw;
+            for (int c = 0; c < shape->ic; ++c) {
+                int col_i = i * shape->ow + j;
+                int col_j = c * (shape->kh * shape->kw);
+                for (int di = 0; di < shape->kh; ++di) {
+                    for (int dj = 0; dj < shape->kw; ++dj) {
+                        arg->col_b[col_i * col_w +
+                                col_j + (di * shape->kw) + dj] = 
+                                arg->im_kernel_b[(patch_i + di) * (shape->iw * shape->ic) +
+                                (patch_j + dj) * shape->ic +
+                                c];
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+void conv2d_matmul(float* in_layer,
+        float* col,
+        float* kernel_r, 
+        float* result,
+        int* shape_arg_arr)
+{
+    struct shape_arg* shape = (struct shape_arg*) shape_arg_arr;
+    
+    for (int b = 0; b < shape->batch; ++b) {
+        float* im_b = in_layer + b * (shape->ih * shape->iw * shape->ic);
+        float* col_b = col + b * ((shape->oh * shape->ow) * (shape->ic * shape->kh * shape->kw));
+        float* result_b = result + b * (shape->oh * shape->ow * shape->od);
+
+        pthread_t threads[P_THREADS];
+        struct im2col_thread_arg t_args[P_THREADS];
+
+        t_args[0].im_kernel_b = im_b;
+        t_args[0].col_b = col_b;
+        t_args[0].shape = shape;
+        int oh_part_size = shape->oh / P_THREADS;
+
+        int t_id;
+
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            if (t_idx > 0) {
+                t_args[t_idx] = t_args[0];
+            }
+
+            int oh_s = oh_part_size * t_idx;
+            int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape->oh;
+            
+            t_args[t_idx].oh_s = oh_s;
+            t_args[t_idx].oh_e = oh_e;
+
+            t_id = pthread_create(&threads[t_idx], NULL, im2col_thread_func, (void*) &t_args[t_idx]);
+            if (t_id < 0) {
+                perror("conv2d im2col thread error : ");
+                exit(0);
+            }
+        }
+
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            pthread_join(threads[t_idx], NULL);
+        }
+
+        // col_b : (oh * ow) X (ic * kh * kw)
+        // kernel_r : (ic * kh * kw) X od
+
+        int m_size = shape->oh * shape->ow;
+        int n_size = shape->od;
+        int k_size = shape->ic * shape->kh * shape->kw;
+        oh_part_size = m_size / P_THREADS;
+
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            t_args[t_idx].im_kernel_b = kernel_r;
+            t_args[t_idx].result_b = result_b;
+
+            int oh_s = oh_part_size * t_idx;
+            int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : m_size;
+            
+            t_args[t_idx].oh_s = oh_s;
+            t_args[t_idx].oh_e = oh_e;
+
+            t_id = pthread_create(&threads[t_idx], NULL, conv2d_matmul_thread_func, (void*) &t_args[t_idx]);
+            if (t_id < 0) {
+                perror("conv2d im2col thread error : ");
+                exit(0);
+            }
+        }
+
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            pthread_join(threads[t_idx], NULL);
+        }
+    }
+}
+
 void* conv2d_thread_func(void* thread_arg) 
 {
     struct conv2d_thread_arg* arg = (struct conv2d_thread_arg*) thread_arg;
@@ -155,9 +291,9 @@ void conv2d(float* in_layer,
 {
     struct shape_arg* shape = (struct shape_arg*) shape_arg_arr;
     
-    pthread_t threads[NUM_THREADS];
-    struct conv2d_thread_arg t_args[NUM_THREADS];
-    int oh_part_size = shape->oh / NUM_THREADS;
+    pthread_t threads[P_THREADS];
+    struct conv2d_thread_arg t_args[P_THREADS];
+    int oh_part_size = shape->oh / P_THREADS;
 
     t_args[0].in_layer = in_layer;
     t_args[0].kernel = kernel;
@@ -166,13 +302,13 @@ void conv2d(float* in_layer,
 
     int t_id;
     
-    for (int t_idx = 0; t_idx < NUM_THREADS; ++t_idx) {
+    for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
         if (t_idx > 0) {
             t_args[t_idx] = t_args[0];
         }
 
         int oh_s = oh_part_size * t_idx;
-        int oh_e = t_idx < NUM_THREADS - 1 ? oh_s + oh_part_size : shape->oh;
+        int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape->oh;
         
         t_args[t_idx].oh_s = oh_s;
         t_args[t_idx].oh_e = oh_e;
@@ -184,7 +320,7 @@ void conv2d(float* in_layer,
         }
     }
 
-    for (int t_idx = 0; t_idx < NUM_THREADS; ++t_idx) {
+    for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
         pthread_join(threads[t_idx], NULL);
     }
 }
