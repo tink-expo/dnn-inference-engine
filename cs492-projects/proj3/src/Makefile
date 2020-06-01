@@ -10,6 +10,7 @@ libdnn_cublas.so: dnn_cublas.cu
 	nvcc -Xcompiler -fPIC -shared -o $@ $^ -lcublas
 
 libdnn_cuda.so: dnn_cuda.cu 
+#	nvcc -Xcompiler -fPIC -Xcompiler -O3 -shared -o $@ $^
 	nvcc -Xcompiler -fPIC -shared -o $@ $^
 
 clean:

@@ -2,11 +2,14 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "math.h"
+#include "pthread.h"
 
-#define THREADS_2D 16
-#define THREADS_1D 256
+#define CUDA_THREADS_2D 16
+#define CUDA_THREADS_1D 256
 
 #define MAX(x, y) (x >= y ? x : y)
+
+#define P_THREADS 4
 
 __global__ void h_cuda_im2col(float* im_b, float* col_b,
         int oh, int ow,
@@ -129,7 +132,140 @@ void im2col(float* im_b,
     }
 }
 
+struct shape_arg {
+    int batch, oh, ow, od;
+    int ih, iw, ic;
+    int kh, kw;
+    int sh, sw;
+};
+
+struct im2col_thread_arg {
+    float* im_b;
+    float* col_b;
+    struct shape_arg* shape;
+    int oh_s;
+    int oh_e;
+};
+
+void* im2col_thread_func(void* thread_arg)
+{
+    struct im2col_thread_arg* arg = (struct im2col_thread_arg*) thread_arg;
+    struct shape_arg* shape = arg->shape;
+
+    int col_w = shape->ic * shape->kh * shape->kw;
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < shape->ow; ++j) {
+            int patch_i = i * shape->sh;
+            int patch_j = j * shape->sw;
+            for (int c = 0; c < shape->ic; ++c) {
+                int col_i = i * shape->ow + j;
+                int col_j = c * (shape->kh * shape->kw);
+                for (int di = 0; di < shape->kh; ++di) {
+                    for (int dj = 0; dj < shape->kw; ++dj) {
+                        arg->col_b[col_i * col_w +
+                                col_j + (di * shape->kw) + dj] = 
+                                arg->im_b[(patch_i + di) * (shape->iw * shape->ic) +
+                                (patch_j + dj) * shape->ic +
+                                c];
+                    }
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
 extern "C" {
+
+void conv2d_cuda_pthread(float* in_layer,
+        float* col,
+        float* kernel_r, 
+        float* result,
+        int batch, int oh, int ow, int od,
+        int ih, int iw, int ic,
+        int kh, int kw,
+        int sh, int sw)
+{
+    for (int b = 0; b < batch; ++b) {
+        float* im_b = in_layer + b * (ih * iw * ic);
+        float* col_b = col + b * ((oh * ow) * (ic * kh * kw));
+        float* result_b = result + b * (oh * ow * od);
+
+        pthread_t threads[P_THREADS];
+        struct im2col_thread_arg t_args[P_THREADS];
+        int oh_part_size = oh / P_THREADS;
+        struct shape_arg shape;
+        shape.batch = batch;
+        shape.oh = oh;
+        shape.ow = ow;
+        shape.ih = ih;
+        shape.iw = iw;
+        shape.ic = ic;
+        shape.kh = kh;
+        shape.kw = kw;
+        shape.sh = sh;
+        shape.sw = sw;
+
+        t_args[0].im_b = im_b;
+        t_args[0].col_b = col_b;
+        t_args[0].shape = &shape;
+
+        int t_id;
+
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            if (t_idx > 0) {
+                t_args[t_idx] = t_args[0];
+            }
+
+            int oh_s = oh_part_size * t_idx;
+            int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape.oh;
+            
+            t_args[t_idx].oh_s = oh_s;
+            t_args[t_idx].oh_e = oh_e;
+
+            t_id = pthread_create(&threads[t_idx], NULL, im2col_thread_func, (void*) &t_args[t_idx]);
+            if (t_id < 0) {
+                perror("conv2d im2col thread error : ");
+                exit(0);
+            }
+        }
+
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            pthread_join(threads[t_idx], NULL);
+        }
+
+        // col_b : (oh * ow) X (ic * kh * kw)
+        // kernel_r : (ic * kh * kw) X od
+
+        int m_size = oh * ow;
+        int n_size = od;
+        int k_size = ic * kh * kw;
+
+        float* d_imcol;
+        float* d_kernel;
+        float* d_result;
+        cudaMalloc((void **) &d_imcol, sizeof(float) * m_size * k_size);
+        cudaMalloc((void **) &d_kernel, sizeof(float) * k_size * n_size);
+        cudaMalloc((void **) &d_result, sizeof(float) * m_size * k_size);
+
+        cudaMemcpy(d_imcol, col_b, sizeof(float) * m_size * k_size, cudaMemcpyHostToDevice);
+        cudaMemcpy(d_kernel, kernel_r, sizeof(float) * k_size * n_size, cudaMemcpyHostToDevice);
+        
+        // TODO: Optimize here for Yolov2tiny size
+        unsigned int grid_r = (m_size + CUDA_THREADS_2D - 1) / CUDA_THREADS_2D;
+        unsigned int grid_c = (n_size + CUDA_THREADS_2D - 1) / CUDA_THREADS_2D;
+        dim3 grid_dim(grid_c, grid_r);
+        dim3 block_dim(CUDA_THREADS_2D, CUDA_THREADS_2D);
+
+        h_cuda_matmul<<<grid_dim, block_dim>>>(d_imcol, d_kernel, d_result, m_size, n_size, k_size);
+        cudaFree(d_imcol);
+        cudaFree(d_kernel);
+
+        cudaMemcpy(result_b, d_result, sizeof(float) * m_size * n_size, cudaMemcpyDeviceToHost);
+        cudaFree(d_result);
+    }
+}
 
 void conv2d_cuda(float* in_layer,
         float* col,
@@ -170,10 +306,10 @@ void conv2d_cuda(float* in_layer,
         cudaMemcpy(d_kernel, kernel_r, sizeof(float) * k_size * n_size, cudaMemcpyHostToDevice);
         
         // TODO: Optimize here for Yolov2tiny size
-        unsigned int grid_r = (m_size + THREADS_2D - 1) / THREADS_2D;
-        unsigned int grid_c = (n_size + THREADS_2D - 1) / THREADS_2D;
+        unsigned int grid_r = (m_size + CUDA_THREADS_2D - 1) / CUDA_THREADS_2D;
+        unsigned int grid_c = (n_size + CUDA_THREADS_2D - 1) / CUDA_THREADS_2D;
         dim3 grid_dim(grid_c, grid_r);
-        dim3 block_dim(THREADS_2D, THREADS_2D);
+        dim3 block_dim(CUDA_THREADS_2D, CUDA_THREADS_2D);
 
         h_cuda_matmul<<<grid_dim, block_dim>>>(d_imcol, d_kernel, d_result, m_size, n_size, k_size);
         cudaFree(d_imcol);
@@ -222,9 +358,9 @@ for (int b = 0; b < batch; ++b) {
     cudaMalloc((void **) &d_col, sizeof(float) * m_size * k_size);
     cudaMemcpy(d_im, im_b, sizeof(float) * im_size, cudaMemcpyHostToDevice);
 
-    unsigned int grid_m = (m_size + THREADS_1D - 1) / THREADS_1D;
+    unsigned int grid_m = (m_size + CUDA_THREADS_1D - 1) / CUDA_THREADS_1D;
     dim3 grid_m_dim(grid_m);
-    dim3 block_m_dim(THREADS_1D);
+    dim3 block_m_dim(CUDA_THREADS_1D);
 
     h_cuda_im2col<<<grid_m_dim, block_m_dim>>>(d_im, d_col,
             oh, ow, iw, ic, kh, kw, sh, sw);
@@ -235,10 +371,10 @@ for (int b = 0; b < batch; ++b) {
     cudaMemcpy(d_kernel, kernel_r, sizeof(float) * k_size * n_size, cudaMemcpyHostToDevice);
     
     // TODO: Optimize here for Yolov2tiny size
-    unsigned int grid_r = (m_size + THREADS_2D - 1) / THREADS_2D;
-    unsigned int grid_c = (n_size + THREADS_2D - 1) / THREADS_2D;
+    unsigned int grid_r = (m_size + CUDA_THREADS_2D - 1) / CUDA_THREADS_2D;
+    unsigned int grid_c = (n_size + CUDA_THREADS_2D - 1) / CUDA_THREADS_2D;
     dim3 grid_dim(grid_c, grid_r);
-    dim3 block_dim(THREADS_2D, THREADS_2D);
+    dim3 block_dim(CUDA_THREADS_2D, CUDA_THREADS_2D);
 
     h_cuda_matmul<<<grid_dim, block_dim>>>(d_col, d_kernel, d_result, m_size, n_size, k_size);
     cudaFree(d_col);
@@ -289,9 +425,9 @@ void batch_norm_cuda(float* in_layer,
     cudaMemcpy(d_alpha, alpha, sizeof(float) * od, cudaMemcpyHostToDevice);
     cudaMemcpy(d_beta, beta, sizeof(float) * od, cudaMemcpyHostToDevice);
     
-    unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
+    unsigned int grid_size = (r_size + CUDA_THREADS_1D - 1) / CUDA_THREADS_1D;
     dim3 grid_dim(grid_size);
-    dim3 block_dim(THREADS_1D);
+    dim3 block_dim(CUDA_THREADS_1D);
 
     h_cuda_batch_norm<<<grid_dim, block_dim>>>(d_alpha, d_beta, d_result, r_size, od);
     cudaFree(d_alpha);
@@ -323,9 +459,9 @@ void batch_norm_cuda2(float* in_layer,
     cudaMemcpy(d_alpha, alpha, sizeof(float) * od, cudaMemcpyHostToDevice);
     cudaMemcpy(d_beta, beta, sizeof(float) * od, cudaMemcpyHostToDevice);
     
-    unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
+    unsigned int grid_size = (r_size + CUDA_THREADS_1D - 1) / CUDA_THREADS_1D;
     dim3 grid_dim(grid_size);
-    dim3 block_dim(THREADS_1D);
+    dim3 block_dim(CUDA_THREADS_1D);
 
     h_cuda_batch_norm2<<<grid_dim, block_dim>>>(d_in_layer, d_alpha, d_beta, d_result, r_size, od);
     cudaFree(d_in_layer);
@@ -428,9 +564,9 @@ void max_pool2d_cuda(float* in_layer,
 
         cudaMemcpy(d_in_layer, in_layer_b, sizeof(float) * i_size, cudaMemcpyHostToDevice);
 
-        unsigned int grid_size = (r_size + THREADS_1D - 1) / THREADS_1D;
+        unsigned int grid_size = (r_size + CUDA_THREADS_1D - 1) / CUDA_THREADS_1D;
         dim3 grid_dim(grid_size);
-        dim3 block_dim(THREADS_1D);
+        dim3 block_dim(CUDA_THREADS_1D);
 
         h_cuda_max_pool2d<<<grid_dim, block_dim>>>(
                 d_in_layer, d_result, 

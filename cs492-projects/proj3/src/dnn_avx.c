@@ -83,7 +83,7 @@ void batch_norm(float* in_layer,
     }
 }
 
-struct conv2d_shape_arg {
+struct shape_arg {
     int batch, oh, ow, od;
     int ih, iw, ic;
     int kh, kw;
@@ -94,14 +94,15 @@ struct conv2d_thread_arg {
     float* in_layer;
     float* kernel;
     float* result;
-    struct conv2d_shape_arg* shape;
+    struct shape_arg* shape;
     int oh_s;
     int oh_e;
 };
 
-void* conv2d_thread_func(void* thread_arg) {
+void* conv2d_thread_func(void* thread_arg) 
+{
     struct conv2d_thread_arg* arg = (struct conv2d_thread_arg*) thread_arg;
-    struct conv2d_shape_arg* shape = arg->shape;
+    struct shape_arg* shape = arg->shape;
     for (int b = 0; b < shape->batch; ++b) {
         for (int i = arg->oh_s; i < arg->oh_e; ++i) {
             for (int j = 0; j < shape->ow; ++j) {
@@ -152,7 +153,7 @@ void conv2d(float* in_layer,
         float* result,
         int* shape_arg_arr)
 {
-    struct conv2d_shape_arg* shape = (struct conv2d_shape_arg*) shape_arg_arr;
+    struct shape_arg* shape = (struct shape_arg*) shape_arg_arr;
     
     pthread_t threads[NUM_THREADS];
     struct conv2d_thread_arg t_args[NUM_THREADS];
@@ -177,7 +178,7 @@ void conv2d(float* in_layer,
         t_args[t_idx].oh_e = oh_e;
 
         t_id = pthread_create(&threads[t_idx], NULL, conv2d_thread_func, (void*) &t_args[t_idx]);
-        if (t_idx < 0) {
+        if (t_id < 0) {
             perror("conv2d thread error : ");
             exit(0);
         }

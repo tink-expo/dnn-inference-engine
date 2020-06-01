@@ -24,6 +24,7 @@ class DnnInferenceEngine(object):
     def __init__(self, graph, debug):
         self.g = graph
         self.debug = debug
+        self.save_dir = os.path.join(os.getcwd(), "intermediate")
 
     def run(self, tin):
         self.g.in_node.set_input(tin)
@@ -45,6 +46,8 @@ class DnnInferenceEngine(object):
                 current.run()
                 if not isinstance(current, Input):
                     counter += 1
+                    np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
+                                current.result)
                 if self.g.is_out_node(current):
                     out = current.result
                 done.add(current)

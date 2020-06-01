@@ -27,6 +27,7 @@ class DnnInferenceEngine(object):
     def __init__(self, graph, debug):
         self.g = graph
         self.debug = debug
+        self.save_dir = os.path.join(os.getcwd(), "intermediate")
 
     def run(self, tin):
         self.g.in_node.set_input(tin)
@@ -48,6 +49,8 @@ class DnnInferenceEngine(object):
                 current.run()
                 if not isinstance(current, Input):
                     counter += 1
+                    np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
+                                current.result)
                 if self.g.is_out_node(current):
                     out = current.result
                 done.add(current)
@@ -143,23 +146,30 @@ def get_out_pads(in_size, filter_size, stride_size, padding):
 
 class Conv2D(DnnNode):
     def __init__(self, name, in_node, kernel, strides, padding):
-        batch, in_height, in_width, in_channels = in_node.result.shape
-        filter_height, filter_width, filter_in_channels, out_channels = kernel.shape
-        if filter_in_channels != in_channels:
+        batch, np_ih, np_iw, ic = in_node.result.shape
+        kh, kw, kernel_ic, od = kernel.shape
+        if kernel_ic != ic:
             raise ValueError
 
         if not (padding == 'SAME' or padding == 'VALID'):
             raise ValueError
 
-        out_height, self.pad_top, self.pad_bottom = get_out_pads(
-                in_height, filter_height, strides[1], padding)
-        out_width, self.pad_left, self.pad_right = get_out_pads(
-                in_width, filter_width, strides[2], padding)
+        oh, self.pad_top, self.pad_bottom = get_out_pads(
+                np_ih, kh, strides[1], padding)
+        ow, self.pad_left, self.pad_right = get_out_pads(
+                np_iw, kw, strides[2], padding)
+        ih = np_ih + self.pad_top + self.pad_bottom
+        iw = np_iw + self.pad_left + self.pad_right
 
         self.in_node = in_node
         self.kernel = np.ascontiguousarray(kernel).astype(np.float32)
         self.strides = strides
-        self.result = np.zeros((batch, out_height, out_width, out_channels), dtype=np.dtype(np.float32, align=True))
+        self.result = np.zeros((batch, oh, ow, od), dtype='float32')
+
+        self.kernel_r = np.ascontiguousarray(
+            kernel.transpose(2, 0, 1, 3).reshape(-1, od))
+        self.col = np.ascontiguousarray(
+                np.zeros((batch, oh * ow, ic * kh * kw), dtype=np.float32))
 
         self.name = name
 
@@ -169,9 +179,10 @@ class Conv2D(DnnNode):
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
-        mylib.conv2d(
+        mylib.conv2d_cublas(
                 in_layer.ctypes.data_as(c_float_pointer_type),
-                self.kernel.ctypes.data_as(c_float_pointer_type), 
+                self.col.ctypes.data_as(c_float_pointer_type),
+                self.kernel_r.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape),
                 *map(ctypes.c_int, in_layer.shape[1:]),
