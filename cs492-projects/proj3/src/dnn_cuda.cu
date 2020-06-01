@@ -100,34 +100,6 @@ __global__ void h_cuda_max_pool2d(
     }
 }
 
-// void im2col(float* im_b_arg,
-//     float* col_b_arg,
-//     int oh, int ow,
-//     int ih, int iw, int ic,
-//     int kh, int kw, 
-//     int sh, int sw)
-// {
-//     float (*im_b)[iw][ic] = (float (*)[iw][ic]) im_b_arg;
-//     float (*col_b)[ic * kh * kw] = (float (*)[ic * kh * kw]) col_b_arg;
-
-//     for (int i = 0; i < oh; ++i) {
-//         for (int j = 0; j < ow; ++j) {
-//             int patch_i = i * sh;
-//             int patch_j = j * sw;
-//             for (int c = 0; c < ic; ++c) {
-//                 int col_i = i * ow + j;
-//                 int col_j = c * (kh * kw);
-//                 for (int di = 0; di < kh; ++di) {
-//                     for (int dj = 0; dj < kw; ++dj) {
-//                         col_b[col_i][col_j + (di * kw) + dj] = 
-//                                 im_b[patch_i + di][patch_j + dj][c];
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
 void im2col(float* im_b,
         float* col_b,
         int oh, int ow,
@@ -135,9 +107,6 @@ void im2col(float* im_b,
         int kh, int kw, 
         int sh, int sw)
 {
-    // float (*im_b)[iw][ic] = (float (*)[iw][ic]) im_b_arg;
-    // float (*col_b)[ic * kh * kw] = (float (*)[ic * kh * kw]) col_b_arg;
-
     int col_w = ic * kh * kw;
     for (int i = 0; i < oh; ++i) {
         for (int j = 0; j < ow; ++j) {
