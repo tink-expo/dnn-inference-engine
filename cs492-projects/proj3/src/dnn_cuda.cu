@@ -3,6 +3,7 @@
 #include "stdlib.h"
 #include "math.h"
 #include "pthread.h"
+#include "immintrin.h"
 
 #define CUDA_THREADS_2D 16
 #define CUDA_THREADS_1D 256
@@ -60,70 +61,70 @@ void im2col(float* im_b,
     int kh, int kw, 
     int sh, int sw)
 {
-int col_w = ic * kh * kw;
-for (int i = 0; i < oh; ++i) {
-    for (int j = 0; j < ow; ++j) {
-        int patch_i = i * sh;
-        int patch_j = j * sw;
-        for (int c = 0; c < ic; ++c) {
-            int col_i = i * ow + j;
-            int col_j = c * (kh * kw);
-            for (int di = 0; di < kh; ++di) {
-                for (int dj = 0; dj < kw; ++dj) {
-                    col_b[col_i * col_w +
-                            col_j + (di * kw) + dj] = 
-                            im_b[(patch_i + di) * (iw * ic) +
-                            (patch_j + dj) * ic +
-                            c];
+    int col_w = ic * kh * kw;
+    for (int i = 0; i < oh; ++i) {
+        for (int j = 0; j < ow; ++j) {
+            int patch_i = i * sh;
+            int patch_j = j * sw;
+            for (int c = 0; c < ic; ++c) {
+                int col_i = i * ow + j;
+                int col_j = c * (kh * kw);
+                for (int di = 0; di < kh; ++di) {
+                    for (int dj = 0; dj < kw; ++dj) {
+                        col_b[col_i * col_w +
+                                col_j + (di * kw) + dj] = 
+                                im_b[(patch_i + di) * (iw * ic) +
+                                (patch_j + dj) * ic +
+                                c];
+                    }
                 }
             }
         }
     }
 }
-}
 
 struct shape_arg {
-int oh, ow, od;
-int ih, iw, ic;
-int kh, kw;
-int sh, sw;
+    int oh, ow, od;
+    int ih, iw, ic;
+    int kh, kw;
+    int sh, sw;
 };
 
 struct im2col_thread_arg {
-float* im_b;
-float* col_b;
-struct shape_arg* shape;
-int oh_s;
-int oh_e;
+    float* im_b;
+    float* col_b;
+    struct shape_arg* shape;
+    int oh_s;
+    int oh_e;
 };
 
 void* im2col_thread_func(void* thread_arg)
 {
-struct im2col_thread_arg* arg = (struct im2col_thread_arg*) thread_arg;
-struct shape_arg* shape = arg->shape;
+    struct im2col_thread_arg* arg = (struct im2col_thread_arg*) thread_arg;
+    struct shape_arg* shape = arg->shape;
 
-int col_w = shape->ic * shape->kh * shape->kw;
-for (int i = arg->oh_s; i < arg->oh_e; ++i) {
-    for (int j = 0; j < shape->ow; ++j) {
-        int patch_i = i * shape->sh;
-        int patch_j = j * shape->sw;
-        for (int c = 0; c < shape->ic; ++c) {
-            int col_i = i * shape->ow + j;
-            int col_j = c * (shape->kh * shape->kw);
-            for (int di = 0; di < shape->kh; ++di) {
-                for (int dj = 0; dj < shape->kw; ++dj) {
-                    arg->col_b[col_i * col_w +
-                            col_j + (di * shape->kw) + dj] = 
-                            arg->im_b[(patch_i + di) * (shape->iw * shape->ic) +
-                            (patch_j + dj) * shape->ic +
-                            c];
+    int col_w = shape->ic * shape->kh * shape->kw;
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < shape->ow; ++j) {
+            int patch_i = i * shape->sh;
+            int patch_j = j * shape->sw;
+            for (int c = 0; c < shape->ic; ++c) {
+                int col_i = i * shape->ow + j;
+                int col_j = c * (shape->kh * shape->kw);
+                for (int di = 0; di < shape->kh; ++di) {
+                    for (int dj = 0; dj < shape->kw; ++dj) {
+                        arg->col_b[col_i * col_w +
+                                col_j + (di * shape->kw) + dj] = 
+                                arg->im_b[(patch_i + di) * (shape->iw * shape->ic) +
+                                (patch_j + dj) * shape->ic +
+                                c];
+                    }
                 }
             }
         }
     }
-}
 
-return 0;
+    return 0;
 }
 
 
@@ -394,7 +395,7 @@ __global__ void h_cuda_max_pool2d(
 
 extern "C" {
 
-    void max_pool2d(float* in_layer,
+void max_pool2d(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od,
         int ih, int iw, int ic,
@@ -500,6 +501,62 @@ void max_pool2d_cuda(float* in_layer,
         cudaMemcpy(result_b, d_result, sizeof(float) * r_size, cudaMemcpyDeviceToHost);
         cudaFree(d_result);
     }
+}
+
+void max_pool2d_avx(float* in_layer,
+    float* result,
+    int batch, int oh, int ow, int od,
+    int ih, int iw, int ic,
+    int kh, int kw,
+    int sh, int sw)
+{
+for (int b = 0; b < batch; ++b) {
+    for (int i = 0; i < oh; ++i) {
+        for (int j = 0; j < ow; ++j) {
+            int in_i = i * sh;
+            int in_j = j * sw;
+
+            int i_idx = b * (ih * iw * ic) +
+                    in_i * (iw * ic) +
+                    in_j * ic;
+            int r_idx = b * (oh * ow * od) +
+                    i * (ow * od) +
+                    j * od;
+            
+            int d;
+            for (d = 0; d <= od - 8; d += 8) {
+                __m256 imax_av = _mm256_loadu_ps(in_layer + i_idx + d);
+                for (int di = 0; di < kh; ++di) {
+                    for (int dj = 0; dj < kw; ++dj) {
+                        __m256 icand_av = _mm256_loadu_ps(
+                                in_layer + i_idx +
+                                di * (iw * ic) +
+                                dj * ic +
+                                d);
+                        imax_av = _mm256_max_ps(imax_av, icand_av);
+                    }
+                }
+                _mm256_storeu_ps(result + r_idx + d, imax_av);
+            }
+
+            if (d < od) {
+                for (; d < od; ++d) {
+                    float imax = in_layer[i_idx + d];
+                    for (int di = 0; di < kh; ++di) {
+                        for (int dj = 0; dj < kw; ++dj) {
+                            imax = MAX(imax, 
+                                    in_layer[i_idx +
+                                    di * (iw * ic) +
+                                    dj * ic +
+                                    d]);
+                        }
+                        result[r_idx + d] = imax;
+                    }
+                }
+            }
+        }
+    }
+}
 }
 
 }  // extern C

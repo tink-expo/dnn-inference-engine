@@ -75,7 +75,7 @@ void* conv2d_thread_func(void* thread_arg)
     }
 }
 
-void conv2d(float* in_layer, 
+void conv2d_pthread(float* in_layer, 
         float* kernel, 
         float* result,
         int batch,
@@ -122,6 +122,59 @@ void conv2d(float* in_layer,
     }
 }
 
+void conv2d(float* in_layer, 
+        float* kernel, 
+        float* result,
+        int batch, int oh, int ow, int od,
+        int ih, int iw, int ic,
+        int kh, int kw,
+        int sh, int sw)
+{
+    for (int b = 0; b < batch; ++b) {
+        for (int i = 0; i < oh; ++i) {
+            for (int j = 0; j < ow; ++j) {
+                __m256 r_av[od / 8]; 
+                for (int d = 0; d <= od - 8; d += 8) {
+                    r_av[d / 8] = _mm256_setzero_ps();
+                }
+                int r_idx = b * (oh * ow * od) +
+                        i * (ow * od) +
+                        j * od;
+                for (int c = 0; c < ic; ++c) {
+                    for (int di = 0; di < kh; ++di) {
+                        for (int dj = 0; dj < kw; ++dj) {
+                            int i_idx = b * (ih * iw * ic) +
+                                    (sh * i + di) * (iw * ic) +
+                                    (sw * j + dj) * ic +
+                                    c;
+                            int k_idx = di * (kw * ic * od) +
+                                    dj * (ic * od) +
+                                    c * od;
+                            int d;
+                            for (d = 0; d <= od - 8; d += 8) {                          
+                                __m256 in_av = _mm256_set1_ps(*(in_layer + i_idx));
+                                __m256 k_av = _mm256_loadu_ps(kernel + k_idx + d);
+                                __m256 cr_av = _mm256_mul_ps(in_av, k_av);
+                                r_av[d / 8] = _mm256_add_ps(r_av[d / 8], cr_av);
+                            }
+
+                            if (d < od) {
+                                for (; d < od; ++d) {
+                                    result[r_idx + d] += in_layer[i_idx] * kernel[k_idx + d];
+                                }
+                            }
+                        }
+                    }
+                }
+                for (int d = 0; d <= od - 8; d += 8) {
+                    _mm256_storeu_ps(result + r_idx + d, r_av[d / 8]);
+                }
+            }
+        }
+    }
+}
+
+
 
 
 
@@ -161,6 +214,9 @@ void bias_add(float* in_layer, float* biases, float* result,
         }
     }
 }
+
+
+
 
 // [MaxPool2D]
 

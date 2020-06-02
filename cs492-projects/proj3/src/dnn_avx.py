@@ -5,6 +5,7 @@ import networkx as nx
 import numpy as np
 import ctypes
 import copy
+import time
 
 mylib = ctypes.cdll.LoadLibrary('./libdnn_avx.so')
 
@@ -190,18 +191,28 @@ class Conv2D(DnnNode):
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant')
+        # t = time.time()
         # mylib.conv2d_matmul(
         #         in_layer.ctypes.data_as(c_float_pointer_type),
         #         self.col.ctypes.data_as(c_float_pointer_type),
         #         self.kernel_r.ctypes.data_as(c_float_pointer_type), 
         #         self.result.ctypes.data_as(c_float_pointer_type),
         #         self.args.ctypes.data_as(c_int_pointer_type))
-        mylib.conv2d(
+        mylib.conv2d_pthread(
                 in_layer.ctypes.data_as(c_float_pointer_type),
                 self.kernel.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
                 self.result.shape[0],
                 self.args.ctypes.data_as(c_int_pointer_type))
+        # mylib.conv2d(
+        #         in_layer.ctypes.data_as(c_float_pointer_type),
+        #         self.kernel.ctypes.data_as(c_float_pointer_type), 
+        #         self.result.ctypes.data_as(c_float_pointer_type),
+        #         *map(ctypes.c_int, self.result.shape),
+        #         *map(ctypes.c_int, in_layer.shape[1:]),
+        #         *map(ctypes.c_int, self.kernel.shape[:2]),
+        #         *map(ctypes.c_int, self.strides[1:3]))
+        # print(time.time() - t)
 
         npc_cmp_print(self)
 

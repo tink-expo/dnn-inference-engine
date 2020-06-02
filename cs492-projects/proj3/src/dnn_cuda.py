@@ -27,6 +27,11 @@ def npc_cmp_print(obj):
     print(abs(obj.result - np.load(npc_path())).max())
     print()
 
+def npc_cmp_n_print(obj):
+    print(obj.name)
+    print(abs(obj.result - np.load(npc_n())).max())
+    print()
+
 # TODO: Add layer print at init
 
 class DnnInferenceEngine(object):
@@ -37,54 +42,48 @@ class DnnInferenceEngine(object):
 
     def run(self, tin):
         self.g.in_node.set_input(tin)
-        # out = {}
-        # currents = [self.g.in_node]
-        # done = set()
-        # counter = 0
-        # while (len(currents) != 0):
-        #     nexts = []
-        #     for current in currents:
-        #         skip_current = False
-        #         predecessors = self.g.G.predecessors(current)
-        #         # print(predecessors)
-        #         # print("PRED {}".format(counter))
-        #         for predecessor in predecessors:
-        #             #print(predecessor)
-        #             if predecessor not in done:
-        #                 print("SKIP")
-        #                 nexts.append(predecessor)
-        #                 skip_current = True
-        #         if skip_current:
-                    
-        #             continue
-        #         current.run()
-        #         if not isinstance(current, Input):
-        #             if self.debug:
-        #                 np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
-        #                         current.result)
-        #             counter += 1
-        #         if self.g.is_out_node(current):
-        #             out = current.result
-        #         done.add(current)
-        #         #print("SUCC {}".format(counter))
-        #         for successor in self.g.G.successors(current):
-        #             #print(successor)
-        #             nexts.append(successor)
-        #     currents = nexts
-        # return out
-
-        current = self.g.in_node
+        out = {}
+        currents = [self.g.in_node]
+        done = set()
         counter = 0
-        while not self.g.is_out_node(current):
-            current.run()
-            if not isinstance(current, Input):
-                if self.debug:
-                    np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
-                            current.result)
-                counter += 1
-            current = next(self.g.G.successors(current))
-        current.run()
-        return current.result
+        while (len(currents) != 0):
+            nexts = []
+            for current in currents:
+                skip_current = False
+                predecessors = self.g.G.predecessors(current)
+                for predecessor in predecessors:
+                    if predecessor not in done:
+                        nexts.append(predecessor)
+                        skip_current = True
+                if skip_current:
+                    
+                    continue
+                current.run()
+                if not isinstance(current, Input):
+                    if self.debug:
+                        np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
+                                current.result)
+                    counter += 1
+                if self.g.is_out_node(current):
+                    out = current.result
+                done.add(current)
+                for successor in self.g.G.successors(current):
+                    nexts.append(successor)
+            currents = nexts
+        return out
+
+        # current = self.g.in_node
+        # counter = 0
+        # while not self.g.is_out_node(current):
+        #     current.run()
+        #     if not isinstance(current, Input):
+        #         if self.debug:
+        #             np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
+        #                     current.result)
+        #         counter += 1
+        #     current = next(self.g.G.successors(current))
+        # current.run()
+        # return current.result
 
 class DnnGraphBuilder(object):
     def __init__(self):
@@ -266,13 +265,15 @@ class MaxPool2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo(np.float32).min)
         
-        mylib.max_pool2d_cuda(in_layer.ctypes.data_as(c_float_pointer_type),
+        t = time.time()
+        mylib.max_pool2d_avx(in_layer.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape,
                 *in_layer.shape[1:],
                 *self.ksize[1:3],
                 *self.strides[1:3],
                 self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
+        print(time.time() - t)
 
         npc_cmp_print(self)
 
