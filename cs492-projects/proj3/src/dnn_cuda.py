@@ -37,34 +37,54 @@ class DnnInferenceEngine(object):
 
     def run(self, tin):
         self.g.in_node.set_input(tin)
-        out = {}
-        currents = [self.g.in_node]
-        done = set()
+        # out = {}
+        # currents = [self.g.in_node]
+        # done = set()
+        # counter = 0
+        # while (len(currents) != 0):
+        #     nexts = []
+        #     for current in currents:
+        #         skip_current = False
+        #         predecessors = self.g.G.predecessors(current)
+        #         # print(predecessors)
+        #         # print("PRED {}".format(counter))
+        #         for predecessor in predecessors:
+        #             #print(predecessor)
+        #             if predecessor not in done:
+        #                 print("SKIP")
+        #                 nexts.append(predecessor)
+        #                 skip_current = True
+        #         if skip_current:
+                    
+        #             continue
+        #         current.run()
+        #         if not isinstance(current, Input):
+        #             if self.debug:
+        #                 np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
+        #                         current.result)
+        #             counter += 1
+        #         if self.g.is_out_node(current):
+        #             out = current.result
+        #         done.add(current)
+        #         #print("SUCC {}".format(counter))
+        #         for successor in self.g.G.successors(current):
+        #             #print(successor)
+        #             nexts.append(successor)
+        #     currents = nexts
+        # return out
+
+        current = self.g.in_node
         counter = 0
-        while (len(currents) != 0):
-            nexts = []
-            for current in currents:
-                skip_current = False
-                predecessors = self.g.G.predecessors(current)
-                for predecessor in predecessors:
-                    if predecessor not in done:
-                        nexts.append(predecessor)
-                        skip_current = True
-                if skip_current:
-                    continue
-                current.run()
-                if not isinstance(current, Input):
-                    if self.debug:
-                        np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
-                                current.result)
-                    counter += 1
-                if self.g.is_out_node(current):
-                    out = current.result
-                done.add(current)
-                for successor in self.g.G.successors(current):
-                    nexts.append(successor)
-            currents = nexts
-        return out
+        while not self.g.is_out_node(current):
+            current.run()
+            if not isinstance(current, Input):
+                if self.debug:
+                    np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
+                            current.result)
+                counter += 1
+            current = next(self.g.G.successors(current))
+        current.run()
+        return current.result
 
 class DnnGraphBuilder(object):
     def __init__(self):
@@ -174,7 +194,7 @@ class Conv2D(DnnNode):
         self.result = np.zeros((batch, oh, ow, od), dtype='float32')
 
         self.args = np.array((
-            *self.result.shape,
+            *self.result.shape[1:],
             ih, iw, ic,
             *self.kernel.shape[:2],
             *self.strides[1:3]),
@@ -197,6 +217,7 @@ class Conv2D(DnnNode):
                 self.col.ctypes.data_as(c_float_pointer_type),
                 self.kernel_r.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
+                self.result.shape[0],
                 self.args.ctypes.data_as(c_int_pointer_type))
 
         npc_cmp_print(self)

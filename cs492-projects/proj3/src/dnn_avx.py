@@ -21,7 +21,7 @@ def npc_n():
     return './intermediate-1/layer_{}.npy'.format(npc - 1)
 
 def npc_cmp_print(obj):
-    # return
+    return
     print(obj.name)
     print(abs(obj.result - np.load(npc_path())).max())
     print()
@@ -171,7 +171,7 @@ class Conv2D(DnnNode):
         self.result = np.zeros((batch, oh, ow, od), dtype=np.dtype(np.float32, align=True))
 
         self.args = np.array((
-            *self.result.shape,
+            *self.result.shape[1:],
             ih, iw, ic,
             *self.kernel.shape[:2],
             *self.strides[1:3]),
@@ -200,6 +200,7 @@ class Conv2D(DnnNode):
                 in_layer.ctypes.data_as(c_float_pointer_type),
                 self.kernel.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
+                self.result.shape[0],
                 self.args.ctypes.data_as(c_int_pointer_type))
 
         npc_cmp_print(self)

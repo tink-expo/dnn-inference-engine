@@ -83,7 +83,7 @@ for (int i = 0; i < oh; ++i) {
 }
 
 struct shape_arg {
-int batch, oh, ow, od;
+int oh, ow, od;
 int ih, iw, ic;
 int kh, kw;
 int sh, sw;
@@ -133,11 +133,12 @@ void conv2d_cuda_pthread(float* in_layer,
         float* col,
         float* kernel_r, 
         float* result,
+        int batch,
         int* shape_arg_arr)
 {
     struct shape_arg* shape = (struct shape_arg*) shape_arg_arr;
     
-    for (int b = 0; b < shape->batch; ++b) {
+    for (int b = 0; b < batch; ++b) {
         float* im_b = in_layer + b * (shape->ih * shape->iw * shape->ic);
         float* col_b = col + b * ((shape->oh * shape->ow) * (shape->ic * shape->kh * shape->kw));
         float* result_b = result + b * (shape->oh * shape->ow * shape->od);

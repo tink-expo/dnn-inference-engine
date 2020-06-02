@@ -14,16 +14,16 @@
 // [Conv2d]
 
 struct conv2d_shape_arg {
-    int batch, oh, ow, od;
+    int oh, ow, od;
     int ih, iw, ic;
     int kh, kw;
     int sh, sw;
 };
 
 struct conv2d_thread_arg {
-    float* in_layer;
+    float* im_b;
     float* kernel;
-    float* result;
+    float* result_b;
     struct conv2d_shape_arg* shape;
     int oh_s;
     int oh_e;
@@ -33,46 +33,43 @@ void* conv2d_thread_func(void* thread_arg)
 {
     struct conv2d_thread_arg* arg = (struct conv2d_thread_arg*) thread_arg;
     struct conv2d_shape_arg* shape = arg->shape;
-    for (int b = 0; b < shape->batch; ++b) {
-        for (int i = arg->oh_s; i < arg->oh_e; ++i) {
-            for (int j = 0; j < shape->ow; ++j) {
-                __m256 r_av[shape->od / 8]; 
-                for (int d = 0; d <= shape->od - 8; d += 8) {
-                    r_av[d / 8] = _mm256_setzero_ps();
-                }
-                int r_idx = b * (shape->oh * shape->ow * shape->od) +
-                        i * (shape->ow * shape->od) +
-                        j * shape->od;
-                for (int c = 0; c < shape->ic; ++c) {
-                    for (int di = 0; di < shape->kh; ++di) {
-                        for (int dj = 0; dj < shape->kw; ++dj) {
-                            int i_idx = b * (shape->ih * shape->iw * shape->ic) +
-                                    (shape->sh * i + di) * (shape->iw * shape->ic) +
-                                    (shape->sw * j + dj) * shape->ic +
-                                    c;
-                            int k_idx = di * (shape->kw * shape->ic * shape->od) +
-                                    dj * (shape->ic * shape->od) +
-                                    c * shape->od;
-                            int d;
-                            for (d = 0; d <= shape->od - 8; d += 8) {                          
-                                __m256 in_av = _mm256_set1_ps(*(arg->in_layer + i_idx));
-                                __m256 k_av = _mm256_loadu_ps(arg->kernel + k_idx + d);
-                                __m256 cr_av = _mm256_mul_ps(in_av, k_av);
-                                r_av[d / 8] = _mm256_add_ps(r_av[d / 8], cr_av);
-                            }
 
-                            if (d < shape->od) {
-                                for (; d < shape->od; ++d) {
-                                    (arg->result)[r_idx + d] += 
-                                            (arg->in_layer)[i_idx] * (arg->kernel)[k_idx + d];
-                                }
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < shape->ow; ++j) {
+            __m256 r_av[shape->od / 8]; 
+            for (int d = 0; d <= shape->od - 8; d += 8) {
+                r_av[d / 8] = _mm256_setzero_ps();
+            }
+            int r_idx = i * (shape->ow * shape->od) +
+                    j * shape->od;
+            for (int c = 0; c < shape->ic; ++c) {
+                for (int di = 0; di < shape->kh; ++di) {
+                    for (int dj = 0; dj < shape->kw; ++dj) {
+                        int i_idx = (shape->sh * i + di) * (shape->iw * shape->ic) +
+                                (shape->sw * j + dj) * shape->ic +
+                                c;
+                        int k_idx = di * (shape->kw * shape->ic * shape->od) +
+                                dj * (shape->ic * shape->od) +
+                                c * shape->od;
+                        int d;
+                        for (d = 0; d <= shape->od - 8; d += 8) {                          
+                            __m256 in_av = _mm256_set1_ps(*(arg->im_b + i_idx));
+                            __m256 k_av = _mm256_loadu_ps(arg->kernel + k_idx + d);
+                            __m256 cr_av = _mm256_mul_ps(in_av, k_av);
+                            r_av[d / 8] = _mm256_add_ps(r_av[d / 8], cr_av);
+                        }
+
+                        if (d < shape->od) {
+                            for (; d < shape->od; ++d) {
+                                (arg->result_b)[r_idx + d] += 
+                                        (arg->im_b)[i_idx] * (arg->kernel)[k_idx + d];
                             }
                         }
                     }
                 }
-                for (int d = 0; d <= shape->od - 8; d += 8) {
-                    _mm256_storeu_ps(arg->result + r_idx + d, r_av[d / 8]);
-                }
+            }
+            for (int d = 0; d <= shape->od - 8; d += 8) {
+                _mm256_storeu_ps(arg->result_b + r_idx + d, r_av[d / 8]);
             }
         }
     }
@@ -81,41 +78,47 @@ void* conv2d_thread_func(void* thread_arg)
 void conv2d(float* in_layer, 
         float* kernel, 
         float* result,
+        int batch,
         int* shape_arg_arr)
 {
     struct conv2d_shape_arg* shape = (struct conv2d_shape_arg*) shape_arg_arr;
-    
-    pthread_t threads[P_THREADS];
-    struct conv2d_thread_arg t_args[P_THREADS];
-    int oh_part_size = shape->oh / P_THREADS;
 
-    t_args[0].in_layer = in_layer;
-    t_args[0].kernel = kernel;
-    t_args[0].result = result;
-    t_args[0].shape = shape;
+    for (int b = 0; b < batch; ++b) {
+        float* im_b = in_layer + b * (shape->ih * shape->iw * shape->ic);
+        float* result_b = result + b * (shape->oh * shape->ow * shape->od);
 
-    int t_id;
-    
-    for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
-        if (t_idx > 0) {
-            t_args[t_idx] = t_args[0];
-        }
+        pthread_t threads[P_THREADS];
+        struct conv2d_thread_arg t_args[P_THREADS];
+        int oh_part_size = shape->oh / P_THREADS;
 
-        int oh_s = oh_part_size * t_idx;
-        int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape->oh;
+        t_args[0].im_b = im_b;
+        t_args[0].kernel = kernel;
+        t_args[0].result_b = result_b;
+        t_args[0].shape = shape;
+
+        int t_id;
         
-        t_args[t_idx].oh_s = oh_s;
-        t_args[t_idx].oh_e = oh_e;
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            if (t_idx > 0) {
+                t_args[t_idx] = t_args[0];
+            }
 
-        t_id = pthread_create(&threads[t_idx], NULL, conv2d_thread_func, (void*) &t_args[t_idx]);
-        if (t_id < 0) {
-            perror("conv2d thread error : ");
-            exit(0);
+            int oh_s = oh_part_size * t_idx;
+            int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape->oh;
+            
+            t_args[t_idx].oh_s = oh_s;
+            t_args[t_idx].oh_e = oh_e;
+
+            t_id = pthread_create(&threads[t_idx], NULL, conv2d_thread_func, (void*) &t_args[t_idx]);
+            if (t_id < 0) {
+                perror("conv2d thread error : ");
+                exit(0);
+            }
         }
-    }
 
-    for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
-        pthread_join(threads[t_idx], NULL);
+        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+            pthread_join(threads[t_idx], NULL);
+        }
     }
 }
 
