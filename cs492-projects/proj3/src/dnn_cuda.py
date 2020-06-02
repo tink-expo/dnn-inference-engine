@@ -22,13 +22,12 @@ def npc_n():
     return './intermediate-1/layer_{}.npy'.format(npc - 1)
 
 def npc_cmp_print(obj):
-    pass
-    # print(obj.name)
-    # print(abs(obj.result - np.load(npc_path())).max())
-    # print()
+    return
+    print(obj.name)
+    print(abs(obj.result - np.load(npc_path())).max())
+    print()
 
 # TODO: Add layer print at init
-# TODO: DEBUG, NDEBUG
 
 class DnnInferenceEngine(object):
     def __init__(self, graph, debug):

@@ -25,6 +25,7 @@ __global__ void add( int *a, int *b, int *c ) {
 
 int main()
 {
+    
     int a[N], b[N], c[N];
     int *dev_a, *dev_b, *dev_c;
 
