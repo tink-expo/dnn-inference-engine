@@ -319,7 +319,7 @@ class BatchNorm(DnnNode):
         
 
     def run(self):
-        mylib.batch_norm_cuda(
+        mylib.batch_norm_pthread(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.alpha.ctypes.data_as(c_float_pointer_type),
                 self.beta.ctypes.data_as(c_float_pointer_type),

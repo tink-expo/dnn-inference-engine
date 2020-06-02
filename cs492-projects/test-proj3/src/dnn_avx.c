@@ -528,6 +528,8 @@ void* batch_norm_thread_func(void* thread_arg)
             }
         }
     }
+
+    return 0;
 }
 
 void batch_norm_pthread(float* in_layer,
