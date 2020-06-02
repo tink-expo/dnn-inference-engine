@@ -15,11 +15,11 @@ c_int_pointer_type = ctypes.POINTER(ctypes.c_int)
 npc = 0
 def npc_path():
     global npc
-    ret = './intermediate-1/layer_{}.npy'.format(npc)
+    ret = '../../proj1/intermediate/layer_{}.npy'.format(npc)
     npc += 1
     return ret
 def npc_n():
-    return './intermediate-1/layer_{}.npy'.format(npc - 1)
+    ret = '../../proj1/intermediate/layer_{}.npy'.format(npc - 1)
 
 def npc_cmp_print(obj):
     # return

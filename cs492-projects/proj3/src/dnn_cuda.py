@@ -15,11 +15,11 @@ c_int_pointer_type = ctypes.POINTER(ctypes.c_int)
 npc = 0
 def npc_path():
     global npc
-    ret = './intermediate-1/layer_{}.npy'.format(npc)
+    ret = '../../proj1/intermediate/layer_{}.npy'.format(npc)
     npc += 1
     return ret
 def npc_n():
-    return './intermediate-1/layer_{}.npy'.format(npc - 1)
+    ret = '../../proj1/intermediate/layer_{}.npy'.format(npc - 1)
 
 def npc_cmp_print(obj):
     # return
@@ -234,13 +234,11 @@ class BiasAdd(DnnNode):
         self.name = name
 
     def run(self):
-        t = time.time()
         mylib.bias_add_pthread(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
-        print(time.time() - t)
         
         npc_cmp_print(self)
 
@@ -267,7 +265,6 @@ class MaxPool2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo(np.float32).min)
         
-        t = time.time()
         mylib.max_pool2d_avx(in_layer.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *self.result.shape,
@@ -275,7 +272,6 @@ class MaxPool2D(DnnNode):
                 *self.ksize[1:3],
                 *self.strides[1:3],
                 self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
-        print(time.time() - t)
 
         npc_cmp_print(self)
 
