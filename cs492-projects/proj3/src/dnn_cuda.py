@@ -235,7 +235,7 @@ class BiasAdd(DnnNode):
 
     def run(self):
         t = time.time()
-        mylib.bias_add_cuda(
+        mylib.bias_add_pthread(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
