@@ -119,13 +119,37 @@ void* conv2d_matmul_thread_func(void* thread_arg)
     int n_size = shape->od;
     int k_size = shape->ic * shape->kh * shape->kw;
 
+    // for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+    //     for (int j = 0; j < n_size; ++j) {
+    //         float res = 0.0f;
+    //         for (int k = 0; k < k_size; ++k) {
+    //             res += arg->col_b[i * k_size + k] * arg->im_kernel_b[k * n_size + j];
+    //         }
+    //         arg->result_b[i * n_size + j] = res;
+    //     }
+    // }
+
     for (int i = arg->oh_s; i < arg->oh_e; ++i) {
-        for (int j = 0; j < n_size; ++j) {
-            float res = 0.0f;
+        // __m256 col_av
+        int d;
+        for (d = 0; d <= n_size - 8; d += 8) {
+            __m256 r_av = _mm256_setzero_ps();
             for (int k = 0; k < k_size; ++k) {
-                res += arg->col_b[i * k_size + k] * arg->im_kernel_b[k * n_size + j];
+                __m256 col_av = _mm256_set1_ps(arg->col_b[i * k_size + k]);
+                __m256 ker_av = _mm256_loadu_ps(arg->im_kernel_b + k * n_size + d);
+                __m256 cr_av = _mm256_mul_ps(col_av, ker_av);
+                r_av = _mm256_add_ps(r_av, cr_av);
             }
-            arg->result_b[i * n_size + j] = res;
+            _mm256_storeu_ps(arg->result_b + i * n_size + d, r_av);
+        }
+        if (d < n_size) {
+            for (; d < n_size; ++d) {
+                float res = 0.0f;
+                for (int k = 0; k < k_size; ++k) {
+                    res += arg->col_b[i * k_size + k] * arg->im_kernel_b[k * n_size + d];
+                }
+                arg->result_b[i * n_size + d] = res;
+            }
         }
     }
 }
