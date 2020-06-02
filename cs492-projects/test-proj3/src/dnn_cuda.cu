@@ -970,7 +970,38 @@ void batch_norm_cuda2(float* in_layer,
 
 // [LeakRelu]
 
+__global__ void h_cuda_leaky_relu(float* result,
+    int r_size, int od)
+{
+    int t_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t_idx < r_size) {
+        float t = result[t_idx];
+        result[t_idx] = t < 0.0f ? 0.1f * t : t;
+    }
+}
+
 extern "C" {
+
+void leaky_relu_cuda(float* in_layer,
+    float* result,
+    int batch, int oh, int ow, int od)
+{
+    int r_size = batch * oh * ow * od;
+    memcpy(result, in_layer, sizeof(float) * r_size); 
+    
+    float* d_result;
+    cudaMalloc((void **) &d_result, sizeof(float) * r_size);
+
+    cudaMemcpy(d_result, result, sizeof(float) * r_size, cudaMemcpyHostToDevice);
+
+    unsigned int grid_size = (r_size + CUDA_THREADS_1D - 1) / CUDA_THREADS_1D;
+    dim3 grid_dim(grid_size);
+    dim3 block_dim(CUDA_THREADS_1D);
+
+    h_cuda_leaky_relu<<<grid_dim, block_dim>>>(d_result, r_size, od);
+    cudaMemcpy(result, d_result, sizeof(float) * r_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_result);
+}
 
 void leaky_relu(float* in_layer,
         float* result,
@@ -985,7 +1016,7 @@ void leaky_relu(float* in_layer,
                             j * od +
                             d;
                     float t = in_layer[idx];
-                    result[idx] = t < 0 ? 0.1 * t : t;
+                    result[idx] = t < 0.0f ? 0.1f * t : t;
                 }
             }
         }
