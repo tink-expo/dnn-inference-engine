@@ -173,7 +173,6 @@ class Conv2D(DnnNode):
         print(name)
 
     def run(self):
-        print(self.name)
         in_layer = np.pad(
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
@@ -202,7 +201,6 @@ class BiasAdd(DnnNode):
         print(name)
 
     def run(self):
-        print(self.name)
         mylib.bias_add(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
@@ -229,7 +227,6 @@ class MaxPool2D(DnnNode):
         print(name)
         
     def run(self):
-        print(self.name)
         in_layer = np.pad(
                 self.in_node.result, 
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
@@ -260,7 +257,6 @@ class BatchNorm(DnnNode):
 
 
     def run(self):
-        print(self.name)
         mylib.batch_norm(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.mean.ctypes.data_as(c_float_pointer_type),
@@ -279,7 +275,6 @@ class LeakyReLU(DnnNode):
         print(name)
 
     def run(self):
-        print(self.name)
         mylib.leaky_relu(self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))

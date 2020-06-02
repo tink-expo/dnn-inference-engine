@@ -78,7 +78,7 @@ def video_object_detection(in_video_path, out_video_path, proc="cpu"):
     # Create an instance of the YOLO_V2_TINY class. Pass the dimension of
     # the input, a path to weight file, and which device you will use as arguments.
 
-    weight_pickle_path = os.path.join(os.getcwd(), 'y2t_weights.pickle')
+    weight_pickle_path = os.path.join(os.getcwd(), '../test-proj3/y2t_weights.pickle')
     model = yolov2tiny.YOLO_V2_TINY(
             [1, k_input_height, k_input_width, 3], weight_pickle_path, proc)
 
@@ -154,7 +154,7 @@ def photo_write(in_video_path, out_photo_path, tensor_path='./intermediate/layer
 def photo_object_detection(in_photo_path, out_photo_path, proc="cpu"):
     frame = cv2.imread(in_photo_path)
 
-    weight_pickle_path = os.path.join(os.getcwd(), 'y2t_weights.pickle')
+    weight_pickle_path = os.path.join(os.getcwd(), '../test-proj3/y2t_weights.pickle')
     model = yolov2tiny.YOLO_V2_TINY(
             [1, k_input_height, k_input_width, 3], weight_pickle_path, proc)
     
