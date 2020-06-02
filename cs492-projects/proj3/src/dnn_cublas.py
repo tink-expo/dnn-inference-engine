@@ -172,6 +172,7 @@ class Conv2D(DnnNode):
                 np.zeros((batch, oh * ow, ic * kh * kw), dtype=np.float32))
 
         self.name = name
+        print(name)
 
     def run(self):
         print(self.name)
@@ -189,7 +190,7 @@ class Conv2D(DnnNode):
                 *map(ctypes.c_int, self.kernel.shape[:2]),
                 *map(ctypes.c_int, self.strides[1:3]))
 
-        npc_cmp_print(self.result)
+        # npc_cmp_print(self.result)
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -202,6 +203,7 @@ class BiasAdd(DnnNode):
         self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
+        print(name)
 
     def run(self):
         print(self.name)
@@ -211,7 +213,7 @@ class BiasAdd(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
         
-        npc_cmp_print(self.result)
+        # npc_cmp_print(self.result)
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -230,6 +232,7 @@ class MaxPool2D(DnnNode):
         self.result = np.zeros((batch, out_height, out_width, in_channels), dtype=np.dtype(np.float32, align=True))
 
         self.name = name
+        print(name)
         
     def run(self):
         print(self.name)
@@ -245,7 +248,7 @@ class MaxPool2D(DnnNode):
                 *self.strides[1:3],
                 self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
 
-        npc_cmp_print(self.result)
+        # npc_cmp_print(self.result)
 
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
@@ -261,6 +264,7 @@ class BatchNorm(DnnNode):
         self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
+        print(name)
         
 
     def run(self):
@@ -274,7 +278,7 @@ class BatchNorm(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
-        npc_cmp_print(self.result)
+        # npc_cmp_print(self.result)
 
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
@@ -282,6 +286,7 @@ class LeakyReLU(DnnNode):
         self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
 
         self.name = name
+        print(name)
 
     def run(self):
         print(self.name)
@@ -289,7 +294,7 @@ class LeakyReLU(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
-        npc_cmp_print(self.result)
+        # npc_cmp_print(self.result)
 
 
 # Do not modify below

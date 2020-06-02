@@ -169,6 +169,7 @@ class Conv2D(DnnNode):
                 np.zeros((batch, oh * ow, ic * kh * kw), dtype=np.float32))
 
         self.name = name
+        print(name)
 
     def run(self):
         print(self.name)
@@ -185,8 +186,6 @@ class Conv2D(DnnNode):
                 *map(ctypes.c_int, in_layer.shape[1:]),
                 *map(ctypes.c_int, self.kernel.shape[:2]),
                 *map(ctypes.c_int, self.strides[1:3]))
-        nl = np.load(npc_path())
-        print(abs(self.result - nl).max())
 
 class BiasAdd(DnnNode):
     def __init__(self, name, in_node, biases):
@@ -199,6 +198,7 @@ class BiasAdd(DnnNode):
         self.result = np.zeros(in_node.result.shape, dtype='float32')
 
         self.name = name
+        print(name)
 
     def run(self):
         print(self.name)
@@ -207,7 +207,6 @@ class BiasAdd(DnnNode):
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
-        print(abs(self.result - np.load(npc_path())).max())
 
 class MaxPool2D(DnnNode):
     def __init__(self, name, in_node, ksize, strides, padding):
@@ -226,6 +225,7 @@ class MaxPool2D(DnnNode):
         self.result = np.zeros((batch, out_height, out_width, in_channels), dtype='float32')
 
         self.name = name
+        print(name)
         
     def run(self):
         print(self.name)
@@ -241,9 +241,6 @@ class MaxPool2D(DnnNode):
                 *self.strides[1:3],
                 self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
 
-        nl = np.load(npc_path())
-        print(abs(self.result - nl).max())
-
 class BatchNorm(DnnNode):
     def __init__(self, name, in_node, mean, variance, gamma, epsilon):
         if not all(arg.ndim == 1 and in_node.result.shape[-1] == arg.shape[0] 
@@ -258,7 +255,8 @@ class BatchNorm(DnnNode):
         self.result = np.zeros(in_node.result.shape, dtype='float32')
 
         self.name = name
-        
+        print(name)
+
 
     def run(self):
         print(self.name)
@@ -271,22 +269,19 @@ class BatchNorm(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
-        print(abs(self.result - np.load(npc_path())).max())
-
 class LeakyReLU(DnnNode):
     def __init__(self, name, in_node):
         self.in_node = in_node
         self.result = np.zeros(in_node.result.shape, dtype='float32')
 
         self.name = name
+        print(name)
 
     def run(self):
         print(self.name)
         mylib.leaky_relu(self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
-
-        print(abs(self.result - np.load(npc_path())).max())
 
 
 # Do not modify below
