@@ -48,9 +48,10 @@ class DnnInferenceEngine(object):
                     continue
                 current.run()
                 if not isinstance(current, Input):
-                    counter += 1
-                    np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
+                    if self.debug:
+                        np.save(os.path.join(self.save_dir, "layer_{}.npy".format(counter)),
                                 current.result)
+                    counter += 1
                 if self.g.is_out_node(current):
                     out = current.result
                 done.add(current)
