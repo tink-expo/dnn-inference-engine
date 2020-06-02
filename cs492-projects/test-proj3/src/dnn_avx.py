@@ -327,7 +327,7 @@ class LeakyReLU(DnnNode):
         print(name)
 
     def run(self):
-        mylib.leaky_relu(self.in_node.result.ctypes.data_as(c_float_pointer_type),
+        mylib.leaky_relu_pthread(self.in_node.result.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
 
