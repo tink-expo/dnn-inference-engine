@@ -980,6 +980,45 @@ __global__ void h_cuda_leaky_relu(float* result,
     }
 }
 
+struct leaky_relu_thread_arg {
+    float* im_b;
+    float* result_b;
+    int ow;
+    int od;
+
+    int oh_s;
+    int oh_e;
+};
+
+void* leaky_relu_thread_func(void* thread_arg)
+{
+    struct leaky_relu_thread_arg* arg = (struct leaky_relu_thread_arg*) thread_arg;
+
+    __m256 const_01 = _mm256_set1_ps(0.1);
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < arg->ow; ++j) {
+            int d;
+            int idx = i * (arg->ow * arg->od) +
+                    j * arg->od;
+            for (d = 0; d < arg->od; d += 8) {
+                __m256 in_av = _mm256_loadu_ps(arg->im_b + idx + d);
+                __m256 in_01 = _mm256_mul_ps(in_av, const_01);
+                __m256 r_av = _mm256_max_ps(in_av, in_01);
+                _mm256_storeu_ps(arg->result_b + idx + d, r_av);
+            }
+
+            if (d < arg->od) {
+                for (; d < arg->od; ++d) {
+                    float t = arg->im_b[idx + d];
+                    arg->result_b[idx + d] = t < 0 ? 0.1 * t : t;
+                } 
+            }
+        }
+    }
+
+    return 0;
+}
+
 extern "C" {
 
 void leaky_relu_cuda(float* in_layer,
@@ -1003,20 +1042,75 @@ void leaky_relu_cuda(float* in_layer,
     cudaFree(d_result);
 }
 
-void leaky_relu(float* in_layer,
+void leaky_relu_pthread(float* in_layer,
         float* result,
         int batch, int oh, int ow, int od)
 {
     for (int b = 0; b < batch; ++b) {
+        float* im_b = in_layer + b * (oh * ow * od);
+        float* result_b = result + b * (oh * ow * od);
+
+        pthread_t threads[P_THREADS];
+        struct leaky_relu_thread_arg t_args[P_THREADS];
+        
+        int num_threads = MIN(P_THREADS, oh);
+        int oh_part_size = oh / num_threads;
+
+        t_args[0].im_b = im_b;
+        t_args[0].result_b = result_b;
+        t_args[0].ow = ow;
+        t_args[0].od = od;
+
+        int t_id;
+
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
+            if (t_idx > 0) {
+                t_args[t_idx] = t_args[0];
+            }
+
+            int oh_s = oh_part_size * t_idx;
+            int oh_e = t_idx < num_threads - 1 ? oh_s + oh_part_size : oh;
+            
+            t_args[t_idx].oh_s = oh_s;
+            t_args[t_idx].oh_e = oh_e;
+
+            t_id = pthread_create(&threads[t_idx], NULL, leaky_relu_thread_func, (void*) &t_args[t_idx]);
+            if (t_id < 0) {
+                perror("bias add thread error : ");
+                exit(0);
+            }
+        }
+
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
+            pthread_join(threads[t_idx], NULL);
+        }
+    }
+}
+
+void leaky_relu_avx(float* in_layer,
+        float* result,
+        int batch, int oh, int ow, int od)
+{
+    __m256 const_01 = _mm256_set1_ps(0.1);
+    for (int b = 0; b < batch; ++b) {
         for (int i = 0; i < oh; ++i) {
             for (int j = 0; j < ow; ++j) {
-                for (int d = 0; d < od; ++d) {
-                    int idx = b * (oh * ow * od) +
-                            i * (ow * od) +
-                            j * od +
-                            d;
-                    float t = in_layer[idx];
-                    result[idx] = t < 0.0f ? 0.1f * t : t;
+                int d;
+                int idx = b * (oh * ow * od) +
+                        i * (ow * od) +
+                        j * od;
+                for (d = 0; d < od; d += 8) {
+                    __m256 in_av = _mm256_loadu_ps(in_layer + idx + d);
+                    __m256 in_01 = _mm256_mul_ps(in_av, const_01);
+                    __m256 r_av = _mm256_max_ps(in_av, in_01);
+                    _mm256_storeu_ps(result + idx + d, r_av);
+                }
+
+                if (d < od) {
+                    for (; d < od; ++d) {
+                        float t = in_layer[idx + d];
+                        result[idx + d] = t < 0 ? 0.1 * t : t;
+                    } 
                 }
             }
         }
