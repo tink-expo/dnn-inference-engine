@@ -9,6 +9,7 @@
 #define CUDA_THREADS_1D 256
 
 #define MAX(x, y) (x >= y ? x : y)
+#define MIN(x, y) (x <= y ? x : y)
 
 #define P_THREADS 4
 
@@ -146,7 +147,9 @@ void conv2d_cuda_pthread(float* in_layer,
 
         pthread_t threads[P_THREADS];
         struct im2col_thread_arg t_args[P_THREADS];
-        int oh_part_size = shape->oh / P_THREADS;
+
+        int num_threads = MIN(P_THREADS, shape->oh);
+        int oh_part_size = shape->oh / num_threads;
         
 
         t_args[0].im_b = im_b;
@@ -155,13 +158,13 @@ void conv2d_cuda_pthread(float* in_layer,
 
         int t_id;
 
-        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
             if (t_idx > 0) {
                 t_args[t_idx] = t_args[0];
             }
 
             int oh_s = oh_part_size * t_idx;
-            int oh_e = t_idx < P_THREADS - 1 ? oh_s + oh_part_size : shape->oh;
+            int oh_e = t_idx < num_threads - 1 ? oh_s + oh_part_size : shape->oh;
             
             t_args[t_idx].oh_s = oh_s;
             t_args[t_idx].oh_e = oh_e;
@@ -173,7 +176,7 @@ void conv2d_cuda_pthread(float* in_layer,
             }
         }
 
-        for (int t_idx = 0; t_idx < P_THREADS; ++t_idx) {
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
             pthread_join(threads[t_idx], NULL);
         }
 
@@ -334,7 +337,44 @@ void conv2d_cuda_im2col_cuda(float* in_layer,
 
 // [BiasAdd]
 
+__global__ void h_cuda_bias_add(
+        float* biases, float* result,
+        int r_size, 
+        int od)
+{
+    int t_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t_idx < r_size) {
+        result[t_idx] += biases[t_idx % od];
+    }
+}
+
 extern "C" {
+
+void bias_add_cuda(float* in_layer, float* biases, float* result,
+    int batch, int oh, int ow, int od)
+{
+    int r_size = batch * oh * ow * od;
+    memcpy(result, in_layer, sizeof(float) * r_size); 
+
+    float* d_biases;
+    float* d_result;
+
+    cudaMalloc((void **) &d_result, sizeof(float) * r_size);
+    cudaMalloc((void **) &d_biases, sizeof(float) * od);
+
+    cudaMemcpy(d_result, result, sizeof(float) * r_size, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_biases, biases, sizeof(float) * od, cudaMemcpyHostToDevice);
+
+    unsigned int grid_size = (r_size + CUDA_THREADS_1D - 1) / CUDA_THREADS_1D;
+    dim3 grid_dim(grid_size);
+    dim3 block_dim(CUDA_THREADS_1D);
+
+    h_cuda_bias_add<<<grid_dim, block_dim>>>(d_biases, d_result, r_size, od);
+    cudaFree(d_biases);
+
+    cudaMemcpy(result, d_result, sizeof(float) * r_size, cudaMemcpyDeviceToHost);
+    cudaFree(d_result);
+}
 
 void bias_add(float* in_layer, float* biases, float* result,
     int batch, int oh, int ow, int od) 

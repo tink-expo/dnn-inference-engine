@@ -22,7 +22,7 @@ def npc_n():
     return './intermediate-1/layer_{}.npy'.format(npc - 1)
 
 def npc_cmp_print(obj):
-    return
+    # return
     print(obj.name)
     print(abs(obj.result - np.load(npc_path())).max())
     print()
@@ -234,11 +234,13 @@ class BiasAdd(DnnNode):
         self.name = name
 
     def run(self):
-        mylib.bias_add(
+        t = time.time()
+        mylib.bias_add_cuda(
                 self.in_node.result.ctypes.data_as(c_float_pointer_type), 
                 self.biases.ctypes.data_as(c_float_pointer_type), 
                 self.result.ctypes.data_as(c_float_pointer_type),
                 *map(ctypes.c_int, self.result.shape))
+        print(time.time() - t)
         
         npc_cmp_print(self)
 
