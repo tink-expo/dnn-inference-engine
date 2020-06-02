@@ -528,70 +528,110 @@ __global__ void h_cuda_max_pool2d(
 
 extern "C" {
 
-void max_pool2d(float* in_layer,
-        float* result,
-        int batch, int oh, int ow, int od,
-        int ih, int iw, int ic,
-        int kh, int kw,
-        int sh, int sw)
+struct max_pool2d_thread_arg {
+    float* im_b;
+    float* result_b;
+    struct shape_arg* shape;
+    int oh_s;
+    int oh_e;
+};
+
+void* max_pool2d_thread_func(void* thread_arg)
 {
-    for (int b = 0; b < batch; ++b) {
-        for (int i = 0; i < oh; ++i) {
-            for (int j = 0; j < ow; ++j) {
-                for (int d = 0; d < od; ++d) {
-                    int ii = (i * sh) * (iw * ic) + (j * sw) * ic + d;
-                    float imax = in_layer[ii];
-                    for (int di = 0; di < kh; ++di) {
-                        for (int dj = 0; dj < kw; ++dj) {
-                            if (di > 0 || dj > 0) {
-                                imax = MAX(imax, 
-                                        in_layer[ii + di * (iw * ic) + dj * ic]);
-                            }
-                        }
+    struct max_pool2d_thread_arg* arg = (struct max_pool2d_thread_arg*) thread_arg;
+    struct shape_arg* shape = arg->shape;
+
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < shape->ow; ++j) {
+            int in_i = i * shape->sh;
+            int in_j = j * shape->sw;
+
+            int i_idx = in_i * (shape->iw * shape->ic) +
+                    in_j * shape->ic;
+            int r_idx = i * (shape->ow * shape->od) +
+                    j * shape->od;
+
+            int d;
+            for (d = 0; d <= shape->od - 8; d += 8) {
+                __m256 imax_av = _mm256_loadu_ps(arg->im_b + i_idx + d);
+                for (int di = 0; di < shape->kh; ++di) {
+                    for (int dj = 0; dj < shape->kw; ++dj) {
+                        __m256 icand_av = _mm256_loadu_ps(
+                                arg->im_b + i_idx +
+                                di * (shape->iw * shape->ic) +
+                                dj * shape->ic +
+                                d);
+                        imax_av = _mm256_max_ps(imax_av, icand_av);
                     }
-                    result[
-                            b * (oh * ow * od) +
-                            i * (ow * od) +
-                            j * od +
-                            d
-                    ] = imax;
+                }
+                _mm256_storeu_ps(arg->result_b + r_idx + d, imax_av);
+            }
+
+            if (d < shape->od) {
+                for (; d < shape->od; ++d) {
+                    float imax = arg->im_b[i_idx + d];
+                    for (int di = 0; di < shape->kh; ++di) {
+                        for (int dj = 0; dj < shape->kw; ++dj) {
+                            imax = MAX(imax, 
+                                    arg->im_b[i_idx +
+                                    di * (shape->iw * shape->ic) +
+                                    dj * shape->ic +
+                                    d]);
+                        }
+                        arg->result_b[r_idx + d] = imax;
+                    }
                 }
             }
         }
     }
+
+    return 0;
 }
 
-void max_pool2d_test(float* in_layer,
-    float* result,
-    int batch, int oh, int ow, int od,
-    int ih, int iw, int ic,
-    int kh, int kw,
-    int sh, int sw)
+void max_pool2d_pthread(float* in_layer,
+        float* result,
+        int batch,
+        int* shape_arg_arr)
 {
+    struct shape_arg* shape = (struct shape_arg*) shape_arg_arr;
+
     for (int b = 0; b < batch; ++b) {
-        int r_size = oh * ow * od;
+        float* im_b = in_layer + b * (shape->ih * shape->iw * shape->ic);
+        float* result_b = result + b * (shape->oh * shape->ow * shape->od);
 
-        float* in_layer_b = in_layer + b * (ih * iw * ic);
-        float* result_b = result + b * (oh * ow * od);
+        pthread_t threads[P_THREADS];
 
-        for (int t_idx = 0; t_idx < r_size; ++t_idx) {
-            int d = t_idx;
-            int i = d / (ow * od);
-            d -= i * (ow * od);
-            int j = d / od;
-            d -= j * od;
+        struct max_pool2d_thread_arg t_args[P_THREADS];
+        
+        int num_threads = MIN(P_THREADS, shape->oh);
+        int oh_part_size = shape->oh / num_threads;
 
-            int ii = (i * sh) * (iw * ic) + (j * sw) * ic + d;
-            float imax = in_layer_b[ii];
-            for (int di = 0; di < kh; ++di) {
-                for (int dj = 0; dj < kw; ++dj) {
-                    if (di > 0 || dj > 0) {
-                        imax = MAX(imax, 
-                                in_layer_b[ii + di * (iw * ic) + dj * ic]);
-                    }
-                }
+        t_args[0].im_b = im_b;
+        t_args[0].result_b = result_b;
+        t_args[0].shape = shape;
+
+        int t_id;
+
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
+            if (t_idx > 0) {
+                t_args[t_idx] = t_args[0];
             }
-            result_b[t_idx] = imax;
+
+            int oh_s = oh_part_size * t_idx;
+            int oh_e = t_idx < num_threads - 1 ? oh_s + oh_part_size : shape->oh;
+            
+            t_args[t_idx].oh_s = oh_s;
+            t_args[t_idx].oh_e = oh_e;
+
+            t_id = pthread_create(&threads[t_idx], NULL, max_pool2d_thread_func, (void*) &t_args[t_idx]);
+            if (t_id < 0) {
+                perror("conv2d thread error : ");
+                exit(0);
+            }
+        }
+
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
+            pthread_join(threads[t_idx], NULL);
         }
     }
 }

@@ -184,6 +184,7 @@ class Conv2D(DnnNode):
         print(name)
 
     def run(self):
+        print(self.name)
         in_layer = self.in_node.result
         in_layer = np.pad(
                 in_layer, 
@@ -221,6 +222,7 @@ class BiasAdd(DnnNode):
         print(name)
 
     def run(self):
+        print(self.name)
         batch, _, _, out_channels = self.result.shape
 
         pool = multp_pool()
@@ -266,6 +268,7 @@ class MaxPool2D(DnnNode):
         print(name)
         
     def run(self):
+        print(self.name)
         in_layer = self.in_node.result
         in_layer = np.pad(
                 in_layer, 
@@ -307,6 +310,7 @@ class BatchNorm(DnnNode):
         
 
     def run(self):
+        print(self.name)
         batch, _, _, out_channels = self.result.shape
 
         pool = multp_pool()
@@ -336,6 +340,7 @@ class LeakyReLU(DnnNode):
         print(name)
 
     def run(self):
+        print(self.name)
         batch, _, _, out_channels = self.result.shape
 
         pool = multp_pool()

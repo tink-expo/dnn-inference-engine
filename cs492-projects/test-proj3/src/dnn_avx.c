@@ -74,6 +74,7 @@ void* conv2d_thread_func(void* thread_arg)
             }
         }
     }
+    return 0;
 }
 
 void conv2d_pthread(float* in_layer, 
@@ -226,6 +227,8 @@ void* bias_add_thread_func(void* thread_arg)
             }
         }
     }
+
+    return 0;
 }
 
 void bias_add_pthread(float* in_layer, float* biases, float* result,
@@ -369,6 +372,8 @@ void* max_pool2d_thread_func(void* thread_arg)
             }
         }
     }
+
+    return 0;
 }
 
 void max_pool2d_pthread(float* in_layer,
@@ -480,6 +485,100 @@ void max_pool2d(float* in_layer,
 
 // [BatchNorm]
 
+struct batch_norm_thread_arg {
+    float* im_b;
+    float* alpha;
+    float* beta;
+    float* result_b;
+    int ow;
+    int od;
+
+    int oh_s;
+    int oh_e;
+};
+
+void* batch_norm_thread_func(void* thread_arg)
+{
+    struct batch_norm_thread_arg* arg = (struct batch_norm_thread_arg*) thread_arg;
+
+    __m256 alpha_av[arg->od / 8];
+    __m256 beta_av[arg->od / 8];
+
+    int d = 0;
+    for (d = 0; d <= arg->od - 8; d += 8) {
+        alpha_av[d / 8] = _mm256_loadu_ps(arg->alpha + d);
+        beta_av[d / 8] = _mm256_loadu_ps(arg->beta + d);
+    }
+
+    for (int i = arg->oh_s; i < arg->oh_e; ++i) {
+        for (int j = 0; j < arg->ow; ++j) {
+            int r_idx = i * (arg->ow * arg->od) +
+                    j * arg->od;
+            for (d = 0; d <= arg->od - 8; d += 8) {
+                __m256 in_av = _mm256_loadu_ps(arg->im_b + r_idx + d);
+                __m256 r_av = _mm256_mul_ps(in_av, alpha_av[d / 8]);
+                r_av = _mm256_sub_ps(r_av, beta_av[d / 8]);
+                _mm256_storeu_ps(arg->result_b + r_idx + d, r_av);
+            }
+            if (d < arg->od) {
+                for (; d < arg->od; ++d) {
+                    arg->result_b[r_idx + d] =
+                            arg->im_b[r_idx + d] * arg->alpha[d] - arg->beta[d];
+                }
+            }
+        }
+    }
+}
+
+void batch_norm_pthread(float* in_layer,
+        float* alpha,
+        float* beta,
+        float* result,
+        int batch, int oh, int ow, int od)
+{
+    for (int b = 0; b < batch; ++b) {
+        float* im_b = in_layer + b * (oh * ow * od);
+        float* result_b = result + b * (oh * ow * od);
+
+        pthread_t threads[P_THREADS];
+        struct batch_norm_thread_arg t_args[P_THREADS];
+        
+        int num_threads = MIN(P_THREADS, oh);
+        int oh_part_size = oh / num_threads;
+
+        t_args[0].im_b = im_b;
+        t_args[0].alpha = alpha;
+        t_args[0].beta = beta;
+        t_args[0].result_b = result_b;
+        t_args[0].ow = ow;
+        t_args[0].od = od;
+
+        int t_id;
+
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
+            if (t_idx > 0) {
+                t_args[t_idx] = t_args[0];
+            }
+
+            int oh_s = oh_part_size * t_idx;
+            int oh_e = t_idx < num_threads - 1 ? oh_s + oh_part_size : oh;
+            
+            t_args[t_idx].oh_s = oh_s;
+            t_args[t_idx].oh_e = oh_e;
+
+            t_id = pthread_create(&threads[t_idx], NULL, batch_norm_thread_func, (void*) &t_args[t_idx]);
+            if (t_id < 0) {
+                perror("bias add thread error : ");
+                exit(0);
+            }
+        }
+
+        for (int t_idx = 0; t_idx < num_threads; ++t_idx) {
+            pthread_join(threads[t_idx], NULL);
+        }
+    }
+}
+
 void batch_norm(float* in_layer,
         float* alpha,
         float* beta,
@@ -498,7 +597,8 @@ void batch_norm(float* in_layer,
     for (int b = 0; b < batch; ++b) {
         for (int i = 0; i < oh; ++i) {
             for (int j = 0; j < ow; ++j) {
-                int r_idx = i * (ow * od) +
+                int r_idx = b * (oh * ow * od) +
+                        i * (ow * od) +
                         j * od;
                 for (d = 0; d <= od - 8; d += 8) {
                     __m256 in_av = _mm256_loadu_ps(in_layer + r_idx + d);

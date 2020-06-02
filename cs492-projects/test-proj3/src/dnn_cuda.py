@@ -32,8 +32,6 @@ def npc_cmp_n_print(obj):
     print(abs(obj.result - np.load(npc_n())).max())
     print()
 
-# TODO: Add layer print at init
-
 class DnnInferenceEngine(object):
     def __init__(self, graph, debug):
         self.g = graph
@@ -190,9 +188,9 @@ class Conv2D(DnnNode):
         self.in_node = in_node
         self.kernel = np.ascontiguousarray(kernel).astype(np.float32)
         self.strides = strides
-        self.result = np.zeros((batch, oh, ow, od), dtype='float32')
+        self.result = np.zeros((batch, oh, ow, od), dtype=np.dtype(np.float32, align=True))
 
-        self.args = np.array((
+        self.args = np.ascontiguousarray((
             *self.result.shape[1:],
             ih, iw, ic,
             *self.kernel.shape[:2],
@@ -219,6 +217,15 @@ class Conv2D(DnnNode):
                 self.result.ctypes.data_as(c_float_pointer_type),
                 self.result.shape[0],
                 self.args.ctypes.data_as(c_int_pointer_type))
+        # mylib.conv2d_cuda_im2col_cuda(
+        #         in_layer.ctypes.data_as(c_float_pointer_type),
+        #         self.col.ctypes.data_as(c_float_pointer_type),
+        #         self.kernel_r.ctypes.data_as(c_float_pointer_type), 
+        #         self.result.ctypes.data_as(c_float_pointer_type),
+        #         *map(ctypes.c_int, self.result.shape),
+        #         *map(ctypes.c_int, in_layer.shape[1:]),
+        #         *map(ctypes.c_int, self.kernel.shape[:2]),
+        #         *map(ctypes.c_int, self.strides[1:3]))
 
         # npc_cmp_print(self)
 
@@ -249,16 +256,28 @@ class MaxPool2D(DnnNode):
         if not (padding == 'SAME' or padding == 'VALID'):
             raise ValueError
         
-        batch, in_height, in_width, in_channels = in_node.result.shape
-        out_height, self.pad_top, self.pad_bottom = get_out_pads(
-                in_height, ksize[1], strides[1], padding)
-        out_width, self.pad_left, self.pad_right = get_out_pads(
-                in_width, ksize[2], strides[2], padding)
+        batch, np_ih, np_iw, ic = in_node.result.shape
+        _, kh, kw, _ = ksize
+
+        oh, self.pad_top, self.pad_bottom = get_out_pads(
+                np_ih, kh, strides[1], padding)
+        ow, self.pad_left, self.pad_right = get_out_pads(
+                np_iw, kw, strides[2], padding)
+        ih = np_ih + self.pad_top + self.pad_bottom
+        iw = np_iw + self.pad_left + self.pad_right
 
         self.in_node = in_node
         self.ksize = ksize
         self.strides = strides
-        self.result = np.zeros((batch, out_height, out_width, in_channels), dtype=np.dtype(np.float32, align=True))
+        self.result = np.zeros((batch, oh, ow, ic), dtype=np.dtype(np.float32, align=True))
+
+        self.args = np.array((
+                *self.result.shape[1:],
+                ih, iw, ic,
+                kh, kw,
+                *self.strides[1:3]),
+                dtype=np.int32)
+
         self.name = name
         print(name)
         
@@ -268,13 +287,17 @@ class MaxPool2D(DnnNode):
                 [(0, 0), (self.pad_top, self.pad_bottom), (self.pad_left, self.pad_right), (0, 0)], 
                 'constant', constant_values=np.finfo(np.float32).min)
         
-        mylib.max_pool2d_avx(in_layer.ctypes.data_as(c_float_pointer_type),
+        # mylib.max_pool2d_avx(in_layer.ctypes.data_as(c_float_pointer_type),
+        #         self.result.ctypes.data_as(c_float_pointer_type),
+        #         *self.result.shape,
+        #         *in_layer.shape[1:],
+        #         *self.ksize[1:3],
+        #         *self.strides[1:3],
+        #         self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
+        mylib.max_pool2d_pthread(in_layer.ctypes.data_as(c_float_pointer_type),
                 self.result.ctypes.data_as(c_float_pointer_type),
-                *self.result.shape,
-                *in_layer.shape[1:],
-                *self.ksize[1:3],
-                *self.strides[1:3],
-                self.pad_top, self.pad_bottom, self.pad_left, self.pad_right)
+                self.result.shape[0],
+                self.args.ctypes.data_as(c_int_pointer_type))
 
         # npc_cmp_print(self)
 
@@ -291,7 +314,6 @@ class BatchNorm(DnnNode):
         self.beta = self.alpha * mean
         
         self.result = np.zeros(in_node.result.shape, dtype=np.dtype(np.float32, align=True))
-        self.result2 = self.result.copy()
         self.name = name
         print(name)
         
