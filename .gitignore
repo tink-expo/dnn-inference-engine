@@ -1,10 +1,2 @@
-/*
-!.gitignore
-!cs492-projects/
-cs492-projects/**/*.*
-cs492-projects/**/test_*
-!cs492-projects/**/*.py
-!cs492-projects/**/*.c
-!cs492-projects/**/*.cu
-
-!cs492-projects/proj1/Dockerfile
+**.jpg
+**.mp4
