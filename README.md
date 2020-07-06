@@ -2,7 +2,7 @@
 Projects for CS492 Systems for Machine Learning, Spring 2020, KAIST
 
 ## About
-This repository is for projects which are implementations of inference engine for DNN that consists of layers such as convolution, batch normalization, and max pooling.  
+This repository is for projects which are implementations of inference engine for DNN that consists of layers such as convolution, batch normalization, and max pooling, using various parallelization techniques.  
 The skeleton for `yolov2tiny.py` and `__init__.py` was provided from the course.
 
 ## Projects
